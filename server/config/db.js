@@ -12,7 +12,10 @@ const dbConfig = {
   database: process.env.DB_NAME || 'sweet_haven_db',
   waitForConnections: true,
   connectionLimit: 15,
-  queueLimit: 0
+  queueLimit: 0,
+  ssl: {
+    rejectUnauthorized: false
+  }
 };
 
 let pool;

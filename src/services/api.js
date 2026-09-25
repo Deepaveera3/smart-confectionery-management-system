@@ -23,6 +23,12 @@ const safeFetch = async (url, options = {}) => {
       return await res.json();
     }
     const text = await res.text();
+    if (res.status === 405) {
+      return {
+        success: false,
+        message: 'HTTP 405 Method Not Allowed: The API request was routed to static frontend instead of Express backend. Please set VITE_API_BASE_URL to your Express backend server URL.'
+      };
+    }
     return { success: res.ok, message: text || `HTTP Status ${res.status}` };
   } catch (err) {
     console.warn(`API connection note (${url}):`, err.message);

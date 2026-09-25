@@ -12,7 +12,10 @@ const dbConfig = {
   database: process.env.DB_NAME || 'sweet_haven_db',
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0
+  queueLimit: 0,
+  ssl: {
+    rejectUnauthorized: false
+  }
 };
 
 async function initializeDatabase() {
@@ -23,7 +26,10 @@ async function initializeDatabase() {
       host: dbConfig.host,
       port: dbConfig.port,
       user: dbConfig.user,
-      password: dbConfig.password
+      password: dbConfig.password,
+      ssl: {
+        rejectUnauthorized: false
+      }
     });
 
     console.log(`📡 Connected to MySQL Server at ${dbConfig.host}:${dbConfig.port}. Initializing database & tables...`);
