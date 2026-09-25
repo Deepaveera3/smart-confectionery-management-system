@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { MapPin, AlertCircle, Plus, CreditCard, Award, ArrowRight } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { apiService } from '../services/api';
 import DeliveryLocationPicker from '../components/DeliveryLocationPicker';
-import { MapPin, AlertCircle, Plus, CreditCard, Award, ArrowRight } from 'lucide-react';
 
 export default function CheckoutPage() {
   const { cartItems, subtotal, deliveryFee, clearCart } = useCart();
@@ -72,7 +72,7 @@ export default function CheckoutPage() {
           setLoyaltyPoints(res.loyalty.current_points || 150);
         }
       }
-    } catch (err) { }
+    } catch (err) {}
   };
 
   const handleApplyCoupon = async () => {
@@ -82,7 +82,7 @@ export default function CheckoutPage() {
       if (res && res.success && res.coupons) {
         const match = res.coupons.find(c => c.code.toUpperCase() === couponCode.toUpperCase());
         if (match) {
-          const disc = match.discount_type === 'percentage'
+          const disc = match.discount_type === 'percentage' 
             ? Math.round(subtotal * (match.discount_value / 100))
             : match.discount_value;
           setCouponDiscount(disc);
@@ -181,7 +181,7 @@ export default function CheckoutPage() {
               <div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
                   {addresses.map(a => (
-                    <div
+                    <div 
                       key={a.id}
                       onClick={() => setSelectedAddressId(a.id)}
                       style={{
@@ -206,7 +206,7 @@ export default function CheckoutPage() {
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-                <DeliveryLocationPicker
+                <DeliveryLocationPicker 
                   defaultAddress={newAddr.address_line1}
                   onLocationSelect={({ coords, address }) => {
                     setNewAddr(prev => ({
@@ -240,12 +240,12 @@ export default function CheckoutPage() {
 
             <div style={{ marginBottom: '1.25rem' }}>
               <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--chocolate-dark)', marginBottom: '0.35rem' }}>Delivery Instructions / Cake Message</label>
-              <textarea
-                rows="2"
-                value={deliveryInstructions}
-                onChange={e => setDeliveryInstructions(e.target.value)}
-                placeholder="Write custom instructions for our delivery executive or cake piping message..."
-                style={{ width: '100%', padding: '0.65rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)', fontSize: '0.9rem' }}
+              <textarea 
+                rows="2" 
+                value={deliveryInstructions} 
+                onChange={e => setDeliveryInstructions(e.target.value)} 
+                placeholder="Write custom instructions for our delivery executive or cake piping message..." 
+                style={{ width: '100%', padding: '0.65rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)', fontSize: '0.9rem' }} 
               />
             </div>
 
@@ -284,12 +284,12 @@ export default function CheckoutPage() {
             <div style={{ marginBottom: '1.25rem', paddingTop: '1rem', borderTop: '1px dashed var(--border-gold)' }}>
               <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--chocolate-dark)', marginBottom: '0.35rem' }}>Promo Code / Coupon</label>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <input
-                  type="text"
-                  value={couponCode}
-                  onChange={e => setCouponCode(e.target.value.toUpperCase())}
-                  placeholder="COUPON CODE"
-                  style={{ flex: 1, padding: '0.45rem 0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)', fontSize: '0.85rem', fontWeight: 700 }}
+                <input 
+                  type="text" 
+                  value={couponCode} 
+                  onChange={e => setCouponCode(e.target.value.toUpperCase())} 
+                  placeholder="COUPON CODE" 
+                  style={{ flex: 1, padding: '0.45rem 0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)', fontSize: '0.85rem', fontWeight: 700 }} 
                 />
                 <button className="btn btn-outline" style={{ padding: '0.45rem 0.85rem', fontSize: '0.8rem' }} onClick={handleApplyCoupon}>
                   Apply
@@ -309,12 +309,12 @@ export default function CheckoutPage() {
                 <span>Balance: {loyaltyPoints} pts</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
-                <input
-                  type="number"
-                  max={loyaltyPoints}
-                  value={redeemPoints}
-                  onChange={e => setRedeemPoints(Math.min(loyaltyPoints, Math.max(0, parseInt(e.target.value || 0))))}
-                  style={{ width: '80px', padding: '0.35rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)', fontSize: '0.85rem', fontWeight: 700 }}
+                <input 
+                  type="number" 
+                  max={loyaltyPoints} 
+                  value={redeemPoints} 
+                  onChange={e => setRedeemPoints(Math.min(loyaltyPoints, Math.max(0, parseInt(e.target.value || 0))))} 
+                  style={{ width: '80px', padding: '0.35rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)', fontSize: '0.85rem', fontWeight: 700 }} 
                 />
                 <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>pts = <strong>-₹{redeemPoints} OFF</strong></span>
               </div>
@@ -350,7 +350,7 @@ export default function CheckoutPage() {
               <span style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--burgundy-royal)' }}>₹{finalPayableTotal}</span>
             </div>
 
-            <button
+            <button 
               onClick={handlePlaceOrder}
               className="btn btn-primary"
               disabled={loading}
