@@ -24,12 +24,20 @@ const authenticateToken = (req, res, next) => {
   }
 };
 
-// Middleware to require Admin Role
+// Middleware to require Admin Role and Authorized Email
 const requireAdmin = (req, res, next) => {
+  const allowedAdminEmail = (process.env.ADMIN_EMAIL || 'deepaveera3slm@gmail.com').toLowerCase().trim();
   if (!req.user || req.user.role !== 'admin') {
     return res.status(403).json({ 
       success: false, 
       message: 'Access forbidden. Administrator privileges required.' 
+    });
+  }
+  const userEmail = (req.user.email || '').toLowerCase().trim();
+  if (userEmail !== allowedAdminEmail && userEmail !== 'deepaveera3slm@gmail.com') {
+    return res.status(403).json({
+      success: false,
+      message: 'Access forbidden. Unauthorized administrator account.'
     });
   }
   next();

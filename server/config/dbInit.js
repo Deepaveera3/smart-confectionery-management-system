@@ -342,12 +342,12 @@ async function initializeDatabase() {
     const [userRows] = await connection.query('SELECT COUNT(*) as count FROM `users`');
     if (userRows[0].count === 0) {
       console.log('🌱 Seeding initial users...');
-      const adminPasswordHash = await bcrypt.hash('Admin@123', 10);
-      const customerPasswordHash = await bcrypt.hash('Admin@123', 10);
+      const adminPasswordHash = await bcrypt.hash(process.env.ADMIN_PASSWORD || 'deepaveeraiyan@123', 10);
+      const customerPasswordHash = await bcrypt.hash('Customer@123', 10);
 
       await connection.query(`
         INSERT INTO \`users\` (\`id\`, \`name\`, \`email\`, \`phone\`, \`password\`, \`role\`, \`status\`) VALUES
-        (1, 'Sweet Haven Admin', 'admin@sweethaven.com', '+91 9876543210', ?, 'admin', 'active'),
+        (1, 'Deepaveera Admin', 'deepaveera3slm@gmail.com', '+91 9876543210', ?, 'admin', 'active'),
         (2, 'Demo Customer', 'customer@sweethaven.com', '+91 9123456789', ?, 'customer', 'active')
       `, [adminPasswordHash, customerPasswordHash]);
     }

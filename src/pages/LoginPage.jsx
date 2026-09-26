@@ -172,7 +172,7 @@ export default function LoginPage() {
               borderRadius: 'var(--radius-full)', 
               background: activeTab === 'customer-login' ? 'var(--burgundy-royal)' : 'transparent',
               color: activeTab === 'customer-login' ? '#fff' : 'var(--text-muted)',
-              fontSize: '0.8rem',
+              fontSize: '0.85rem',
               fontWeight: 600,
               padding: '0.45rem 0.5rem'
             }}
@@ -187,28 +187,13 @@ export default function LoginPage() {
               borderRadius: 'var(--radius-full)', 
               background: activeTab === 'customer-signup' ? 'var(--burgundy-royal)' : 'transparent',
               color: activeTab === 'customer-signup' ? '#fff' : 'var(--text-muted)',
-              fontSize: '0.8rem',
+              fontSize: '0.85rem',
               fontWeight: 600,
               padding: '0.45rem 0.5rem'
             }}
             onClick={() => { setActiveTab('customer-signup'); setEmail(''); setError(''); }}
           >
             Register (OTP)
-          </button>
-          <button 
-            className="btn"
-            style={{ 
-              flex: 1, 
-              borderRadius: 'var(--radius-full)', 
-              background: activeTab === 'admin-login' ? 'var(--burgundy-royal)' : 'transparent',
-              color: activeTab === 'admin-login' ? '#fff' : 'var(--text-muted)',
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              padding: '0.45rem 0.5rem'
-            }}
-            onClick={() => { setActiveTab('admin-login'); setEmail('admin@sweethaven.com'); setError(''); }}
-          >
-            Admin
           </button>
         </div>
 
@@ -294,11 +279,7 @@ export default function LoginPage() {
         </form>
 
         <div style={{ marginTop: '1.5rem', textAlign: 'center', paddingTop: '1rem', borderTop: '1px solid var(--border-light)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-          {activeTab === 'admin-login' ? (
-            <span>Demo Admin Credentials: <strong>admin@sweethaven.com</strong> / <strong>Admin@123</strong></span>
-          ) : (
-            <span>Demo Customer Credentials: <strong>customer@sweethaven.com</strong> / <strong>Admin@123</strong></span>
-          )}
+          <span>Demo Customer Credentials: <strong>customer@sweethaven.com</strong> / <strong>Customer@123</strong></span>
         </div>
       </div>
 

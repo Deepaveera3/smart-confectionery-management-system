@@ -27,7 +27,6 @@ export default function Footer() {
               <li><a href="/custom-cake">Custom Cake Studio</a></li>
               <li><a href="/loyalty">Digital Loyalty Club</a></li>
               <li><a href="/track">Live Food Order Tracking</a></li>
-              <li><a href="/admin">Admin Control Dashboard</a></li>
             </ul>
           </div>
 

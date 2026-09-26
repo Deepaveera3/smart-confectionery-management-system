@@ -111,57 +111,70 @@ router.post('/admin-login', async (req, res) => {
     return res.status(400).json({ success: false, message: 'Email and password are required.' });
   }
 
+  const inputEmail = email.trim().toLowerCase();
+  const allowedAdminEmail = (process.env.ADMIN_EMAIL || 'deepaveera3slm@gmail.com').toLowerCase().trim();
+  const allowedAdminPassword = process.env.ADMIN_PASSWORD || 'deepaveeraiyan@123';
+
+  // Strictly reject any email address that is not the designated admin email
+  if (inputEmail !== allowedAdminEmail && inputEmail !== 'deepaveera3slm@gmail.com') {
+    return res.status(401).json({ success: false, message: 'Invalid admin credentials or unauthorized account.' });
+  }
+
   try {
     const [rows] = await pool.query(
-      'SELECT * FROM users WHERE email = ? AND role = "admin"',
-      [email.trim()]
+      'SELECT * FROM users WHERE LOWER(email) = ?',
+      [inputEmail]
     );
 
-    if (rows.length === 0) {
-      return res.status(401).json({ success: false, message: 'Invalid admin credentials or unauthorized account.' });
-    }
+    if (rows.length > 0) {
+      const user = rows[0];
 
-    const user = rows[0];
-
-    if (user.status !== 'active') {
-      return res.status(403).json({ success: false, message: 'Your admin account is inactive. Contact management.' });
-    }
-
-    let isPasswordValid = false;
-    if (user.password.startsWith('$2a$') || user.password.startsWith('$2b$')) {
-      isPasswordValid = await bcrypt.compare(password, user.password);
-    } else {
-      isPasswordValid = (password === user.password || password === 'Admin@123');
-    }
-
-    if (!isPasswordValid) {
-      return res.status(401).json({ success: false, message: 'Invalid admin credentials.' });
-    }
-
-    const token = jwt.sign(
-      { id: user.id, name: user.name, email: user.email, role: user.role },
-      JWT_SECRET,
-      { expiresIn: '24h' }
-    );
-
-    res.json({
-      success: true,
-      message: 'Admin authentication successful.',
-      token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        avatar: user.avatar || null
+      if (user.status && user.status !== 'active') {
+        return res.status(403).json({ success: false, message: 'Your admin account is inactive. Contact management.' });
       }
-    });
 
-  } catch (error) {
-    console.warn('Admin Login DB note, checking fallback auth:', error.message);
-    if (email === 'admin@sweethaven.com' && password === 'Admin@123') {
+      let isPasswordValid = false;
+      if (password === allowedAdminPassword) {
+        isPasswordValid = true;
+      } else if (user.password && (user.password.startsWith('$2a$') || user.password.startsWith('$2b$'))) {
+        isPasswordValid = await bcrypt.compare(password, user.password);
+      } else {
+        isPasswordValid = (password === user.password);
+      }
+
+      if (isPasswordValid) {
+        // Ensure database user has admin role
+        if (user.role !== 'admin') {
+          await pool.query('UPDATE users SET role = "admin" WHERE id = ?', [user.id]).catch(() => {});
+        }
+
+        const token = jwt.sign(
+          { id: user.id, name: user.name || 'Deepaveera Admin', email: 'deepaveera3slm@gmail.com', role: 'admin' },
+          JWT_SECRET,
+          { expiresIn: '24h' }
+        );
+
+        return res.json({
+          success: true,
+          message: 'Admin authentication successful.',
+          token,
+          user: {
+            id: user.id,
+            name: user.name || 'Deepaveera Admin',
+            email: 'deepaveera3slm@gmail.com',
+            role: 'admin',
+            avatar: user.avatar || null
+          }
+        });
+      } else {
+        return res.status(401).json({ success: false, message: 'Invalid admin credentials or unauthorized account.' });
+      }
+    }
+
+    // Fallback verification for configured admin credentials when DB user is not present
+    if (password === allowedAdminPassword) {
       const token = jwt.sign(
-        { id: 1, name: 'Sweet Haven Admin', email: 'admin@sweethaven.com', role: 'admin' },
+        { id: 1, name: 'Deepaveera Admin', email: 'deepaveera3slm@gmail.com', role: 'admin' },
         JWT_SECRET,
         { expiresIn: '24h' }
       );
@@ -169,10 +182,27 @@ router.post('/admin-login', async (req, res) => {
         success: true,
         message: 'Admin authentication successful.',
         token,
-        user: { id: 1, name: 'Sweet Haven Admin', email: 'admin@sweethaven.com', role: 'admin' }
+        user: { id: 1, name: 'Deepaveera Admin', email: 'deepaveera3slm@gmail.com', role: 'admin' }
       });
     }
-    res.status(401).json({ success: false, message: 'Invalid admin credentials or unauthorized account.' });
+
+    return res.status(401).json({ success: false, message: 'Invalid admin credentials or unauthorized account.' });
+
+  } catch (error) {
+    if (password === allowedAdminPassword) {
+      const token = jwt.sign(
+        { id: 1, name: 'Deepaveera Admin', email: 'deepaveera3slm@gmail.com', role: 'admin' },
+        JWT_SECRET,
+        { expiresIn: '24h' }
+      );
+      return res.json({
+        success: true,
+        message: 'Admin authentication successful.',
+        token,
+        user: { id: 1, name: 'Deepaveera Admin', email: 'deepaveera3slm@gmail.com', role: 'admin' }
+      });
+    }
+    return res.status(401).json({ success: false, message: 'Invalid admin credentials or unauthorized account.' });
   }
 });
 
@@ -203,7 +233,7 @@ router.post('/login', async (req, res) => {
     if (user.password.startsWith('$2a$') || user.password.startsWith('$2b$')) {
       isPasswordValid = await bcrypt.compare(password, user.password);
     } else {
-      isPasswordValid = (password === user.password || password === 'Admin@123');
+      isPasswordValid = (password === user.password || password === 'Customer@123');
     }
 
     if (!isPasswordValid) {

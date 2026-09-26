@@ -3,8 +3,15 @@ import { apiService } from '../services/api';
 
 const CartContext = createContext();
 
-export const CartProvider = ({ children }) => {
-  const [cartItems, setCartItems] = useState([
+const getInitialCart = () => {
+  try {
+    const stored = localStorage.getItem('sweet_haven_cart');
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {}
+  return [
     {
       cart_id: 1,
       id: 1,
@@ -29,7 +36,11 @@ export const CartProvider = ({ children }) => {
       weight_size: '300g Box',
       image: 'https://images.unsplash.com/photo-1549007994-cb92caebd54b?w=700&q=80'
     }
-  ]);
+  ];
+};
+
+export const CartProvider = ({ children }) => {
+  const [cartItems, setCartItems] = useState(getInitialCart);
 
   const [wishlistItems, setWishlistItems] = useState([
     {
@@ -56,6 +67,13 @@ export const CartProvider = ({ children }) => {
 
   const [customerUser, setCustomerUser] = useState(null);
 
+  // Sync cartItems state to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('sweet_haven_cart', JSON.stringify(cartItems));
+    } catch (e) {}
+  }, [cartItems]);
+
   useEffect(() => {
     const userStr = localStorage.getItem('sweet_haven_user');
     const token = localStorage.getItem('sweet_haven_token');
@@ -73,32 +91,54 @@ export const CartProvider = ({ children }) => {
         apiService.getCart(),
         apiService.getWishlist()
       ]);
-      if (cRes && cRes.success && cRes.cartItems) setCartItems(cRes.cartItems);
-      if (wRes && wRes.success && wRes.wishlistItems) setWishlistItems(wRes.wishlistItems);
+      if (cRes && cRes.success && Array.isArray(cRes.cartItems) && cRes.cartItems.length > 0) {
+        setCartItems(cRes.cartItems);
+      }
+      if (wRes && wRes.success && Array.isArray(wRes.wishlistItems)) {
+        setWishlistItems(wRes.wishlistItems);
+      }
     } catch (err) {}
   };
 
   const handleAddToCart = async (product, quantity = 1) => {
-    // Check stock
-    const stock = product.stock_quantity !== undefined ? product.stock_quantity : 10;
+    const qtyToAdd = product.selectedQuantity || quantity;
+    const stock = product.stock_quantity !== undefined ? product.stock_quantity : (product.stockQuantity ?? 10);
     if (stock <= 0) return { success: false, message: 'Item is currently Out of Stock.' };
 
-    const existingIdx = cartItems.findIndex(i => i.id === product.id);
-    if (existingIdx !== -1) {
-      const newQty = cartItems[existingIdx].quantity + quantity;
-      if (newQty > stock) return { success: false, message: `Only ${stock} units available.` };
-      setCartItems(prev => {
+    let updatedList = [];
+    setCartItems(prev => {
+      const existingIdx = prev.findIndex(i => i.id === product.id);
+      if (existingIdx !== -1) {
         const copy = [...prev];
+        const newQty = copy[existingIdx].quantity + qtyToAdd;
         copy[existingIdx].quantity = newQty;
+        updatedList = copy;
         return copy;
-      });
-    } else {
-      setCartItems(prev => [...prev, { ...product, quantity }]);
-    }
+      } else {
+        const newItem = {
+          cart_id: Date.now(),
+          id: product.id,
+          name: product.name,
+          category: product.category,
+          price: product.price,
+          discount: product.discount || 0,
+          quantity: qtyToAdd,
+          stock_quantity: stock,
+          weight_size: product.weight_size || product.weightSize || '500g',
+          image: product.image
+        };
+        updatedList = [...prev, newItem];
+        return updatedList;
+      }
+    });
+
+    try {
+      localStorage.setItem('sweet_haven_cart', JSON.stringify(updatedList));
+    } catch (e) {}
 
     if (customerUser) {
       try {
-        await apiService.addToCart(product.id, quantity);
+        await apiService.addToCart(product.id, qtyToAdd);
       } catch (e) {}
     }
 

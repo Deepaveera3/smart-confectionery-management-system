@@ -136,11 +136,6 @@ export default function Navbar({ onOpenSearch }) {
             </Link>
           )}
 
-          <Link to="/admin" className="btn btn-outline admin-nav-btn" style={{ padding: '0.45rem 0.9rem', fontSize: '0.82rem' }}>
-            <ShieldCheck size={15} />
-            Admin
-          </Link>
-
           {/* Mobile Menu Button */}
           <button 
             className="icon-btn mobile-menu-toggle"
@@ -170,7 +165,6 @@ export default function Navbar({ onOpenSearch }) {
             ) : (
               <li><button onClick={() => { handleLogout(); setMobileMenuOpen(false); }} style={{ border: 'none', background: 'transparent', color: '#c0392b', fontWeight: 600, fontSize: '1rem', cursor: 'pointer' }}>Sign Out ({customerUser.name})</button></li>
             )}
-            <li><Link to="/admin" onClick={() => setMobileMenuOpen(false)} style={{ color: 'var(--burgundy-royal)', fontWeight: 600 }}>Admin Portal Dashboard</Link></li>
           </ul>
         </div>
       )}

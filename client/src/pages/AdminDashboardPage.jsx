@@ -46,8 +46,9 @@ export default function AdminDashboardPage() {
   // Authentication State
   const [adminUser, setAdminUser] = useState(null);
   const [authToken, setAuthToken] = useState('');
-  const [loginEmail, setLoginEmail] = useState('admin@sweethaven.com');
-  const [loginPassword, setLoginPassword] = useState('Admin@123');
+  const [loginEmail, setLoginEmail] = useState('deepaveera3slm@gmail.com');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [accessDenied, setAccessDenied] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
 
@@ -190,16 +191,21 @@ export default function AdminDashboardPage() {
   const [orderStatusFilter, setOrderStatusFilter] = useState('All');
   const [customerSearch, setCustomerSearch] = useState('');
 
-  // Initial Auth Check
+  // Initial Auth Check & Role Protection
   useEffect(() => {
     const savedToken = localStorage.getItem('sweet_haven_token');
     const savedUserStr = localStorage.getItem('sweet_haven_user');
     if (savedToken && savedUserStr) {
       try {
         const parsedUser = JSON.parse(savedUserStr);
-        if (parsedUser.role === 'admin') {
+        if (parsedUser.role === 'admin' && parsedUser.email?.toLowerCase() === 'deepaveera3slm@gmail.com') {
           setAdminUser(parsedUser);
           setAuthToken(savedToken);
+        } else {
+          setAccessDenied(true);
+          setTimeout(() => {
+            window.location.href = '/';
+          }, 1500);
         }
       } catch (e) {
         console.error('Invalid saved user data');
@@ -289,7 +295,7 @@ export default function AdminDashboardPage() {
 
     try {
       const res = await apiService.adminLogin(loginEmail, loginPassword);
-      if (res.success && res.token && res.user && res.user.role === 'admin') {
+      if (res.success && res.token && res.user && res.user.role === 'admin' && res.user.email?.toLowerCase() === 'deepaveera3slm@gmail.com') {
         localStorage.setItem('sweet_haven_token', res.token);
         localStorage.setItem('sweet_haven_user', JSON.stringify(res.user));
         setAdminUser(res.user);
@@ -556,6 +562,19 @@ export default function AdminDashboardPage() {
     } catch (err) {}
   };
 
+  if (accessDenied) {
+    return (
+      <div className="container" style={{ padding: '4rem 1.5rem', textAlign: 'center', minHeight: '65vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ background: '#f8d7da', border: '1px solid #f5c6cb', color: '#721c24', padding: '2rem', borderRadius: '16px', maxWidth: '480px', width: '100%', boxShadow: 'var(--shadow-md)' }}>
+          <ShieldAlert size={48} style={{ margin: '0 auto 1rem auto', color: '#c0392b' }} />
+          <h2 style={{ marginBottom: '0.5rem', fontSize: '1.4rem', fontFamily: 'var(--font-heading)' }}>Access Forbidden</h2>
+          <p style={{ fontSize: '0.9rem', margin: 0 }}>Administrator privileges required. Customer accounts cannot access the management dashboard.</p>
+          <span style={{ fontSize: '0.8rem', color: '#64748b', display: 'block', marginTop: '1rem' }}>Redirecting to Home Page...</span>
+        </div>
+      </div>
+    );
+  }
+
   // ----------------------------------------------------
   // UNAUTHENTICATED RENDER (ADMIN LOGIN FORM)
   // ----------------------------------------------------
@@ -576,7 +595,7 @@ export default function AdminDashboardPage() {
               <Lock size={28} style={{ color: 'var(--burgundy-royal)' }} />
             </div>
             <h1 style={{ fontFamily: 'var(--font-heading)', color: 'var(--burgundy-royal)', fontSize: '1.8rem' }}>
-              Sweet Haven Admin Login
+              Sweet Haven Admin Portal
             </h1>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '0.35rem' }}>
               Protected Operational Management System
@@ -601,6 +620,7 @@ export default function AdminDashboardPage() {
                   required
                   value={loginEmail}
                   onChange={(e) => setLoginEmail(e.target.value)}
+                  placeholder="deepaveera3slm@gmail.com"
                   style={{
                     width: '100%',
                     padding: '0.7rem 0.85rem 0.7rem 2.6rem',
@@ -623,6 +643,7 @@ export default function AdminDashboardPage() {
                   required
                   value={loginPassword}
                   onChange={(e) => setLoginPassword(e.target.value)}
+                  placeholder="••••••••"
                   style={{
                     width: '100%',
                     padding: '0.7rem 0.85rem 0.7rem 2.6rem',
@@ -643,10 +664,6 @@ export default function AdminDashboardPage() {
               {loginLoading ? 'Authenticating Admin...' : 'Sign In as Administrator'}
             </button>
           </form>
-
-          <div style={{ marginTop: '1.5rem', textAlign: 'center', paddingTop: '1rem', borderTop: '1px solid var(--border-light)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-            🔑 Default Credentials: <strong>admin@sweethaven.com</strong> / <strong>Admin@123</strong>
-          </div>
         </div>
       </div>
     );
