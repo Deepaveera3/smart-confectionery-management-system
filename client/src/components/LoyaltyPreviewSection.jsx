@@ -11,11 +11,14 @@ export default function LoyaltyPreviewSection() {
 
   useEffect(() => {
     if (customerUser) {
-      apiService.getMyLoyaltyAccount().then(res => {
-        if (res && res.success && res.account) {
-          setLoyaltyAccount(res.account);
-        }
-      }).catch(() => {});
+      const fetchLoyalty = apiService.getMyLoyaltyAccount || apiService.getCustomerLoyalty;
+      if (typeof fetchLoyalty === 'function') {
+        fetchLoyalty().then(res => {
+          if (res && res.success && res.account) {
+            setLoyaltyAccount(res.account);
+          }
+        }).catch(() => {});
+      }
     }
   }, [customerUser]);
 

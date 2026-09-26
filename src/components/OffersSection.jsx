@@ -13,7 +13,8 @@ export default function OffersSection() {
 
   const fetchOffers = async () => {
     try {
-      const res = await apiService.getActiveOffers();
+      const getOffersFn = apiService.getActiveOffers || apiService.getOffers;
+      const res = typeof getOffersFn === 'function' ? await getOffersFn() : null;
       if (res && res.success) {
         if (res.coupons) setCoupons(res.coupons);
         if (res.offers) setOffers(res.offers);

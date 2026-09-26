@@ -190,6 +190,10 @@ export const apiService = {
     return safeFetch(`${API_BASE_URL}/offers`);
   },
 
+  getActiveOffers: async () => {
+    return safeFetch(`${API_BASE_URL}/offers`);
+  },
+
   getAdminCoupons: async () => {
     return safeFetch(`${API_BASE_URL}/offers/admin/all`, {
       headers: getHeaders()
@@ -456,6 +460,12 @@ export const apiService = {
 
   // STAGE 6: Customer & Admin Loyalty APIs
   getCustomerLoyalty: async () => {
+    return safeFetch(`${API_BASE_URL}/admin/loyalty/customer`, {
+      headers: getHeaders()
+    });
+  },
+
+  getMyLoyaltyAccount: async () => {
     return safeFetch(`${API_BASE_URL}/admin/loyalty/customer`, {
       headers: getHeaders()
     });
