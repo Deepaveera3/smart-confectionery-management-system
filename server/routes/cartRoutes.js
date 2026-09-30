@@ -1,67 +1,68 @@
 const express = require('express');
-const { pool } = require('../config/db');
+const mongoose = require('mongoose');
+const CartItem = require('../models/CartItem');
+const Product = require('../models/Product');
 const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
 
-/**
- * 1. CUSTOMER: Get Cart Items
- */
+// 1. Get Cart Items
 router.get('/', authenticateToken, async (req, res) => {
   const userId = req.user.id;
   try {
-    const [rows] = await pool.query(
-      `SELECT c.id as cart_id, c.quantity, p.*, (p.price * (1 - p.discount/100)) as discounted_price
-       FROM cart_items c 
-       JOIN products p ON c.product_id = p.id 
-       WHERE c.user_id = ?
-       ORDER BY c.id DESC`,
-      [userId]
-    );
-    res.json({ success: true, cartItems: rows });
+    const cartItems = await CartItem.find({ user_id: userId }).lean();
+    const enriched = [];
+    for (const ci of cartItems) {
+      let prod = null;
+      try {
+        if (mongoose.Types.ObjectId.isValid(ci.product_id)) {
+          prod = await Product.findById(ci.product_id).lean();
+        } else {
+          prod = await Product.findOne({ legacy_id: parseInt(ci.product_id) }).lean();
+        }
+      } catch (e) {}
+      if (prod) {
+        enriched.push({
+          ...prod, id: prod._id.toString(),
+          cart_id: ci._id.toString(),
+          quantity: ci.quantity,
+          discounted_price: prod.price * (1 - prod.discount / 100)
+        });
+      }
+    }
+    res.json({ success: true, cartItems: enriched });
   } catch (error) {
     console.error('Fetch cart error:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch cart items.' });
   }
 });
 
-/**
- * 2. CUSTOMER: Add Item to Cart
- */
+// 2. Add Item to Cart
 router.post('/add', authenticateToken, async (req, res) => {
   const userId = req.user.id;
   const { productId, quantity = 1 } = req.body;
-
-  if (!productId) {
-    return res.status(400).json({ success: false, message: 'Product ID is required.' });
-  }
-
-  const pId = parseInt(productId);
+  if (!productId) return res.status(400).json({ success: false, message: 'Product ID is required.' });
   const qty = parseInt(quantity || 1);
 
   try {
-    // Check product exists and has stock
-    const [prods] = await pool.query('SELECT stock_quantity, name, is_available FROM products WHERE id = ?', [pId]);
-    if (prods.length === 0) {
-      return res.status(404).json({ success: false, message: 'Product not found.' });
+    let prod = null;
+    if (mongoose.Types.ObjectId.isValid(productId)) {
+      prod = await Product.findById(productId);
+    } else {
+      prod = await Product.findOne({ legacy_id: parseInt(productId) });
     }
 
-    const prod = prods[0];
-    if (!prod.is_available) {
-      return res.status(400).json({ success: false, message: 'This item is currently unavailable.' });
-    }
+    if (!prod) return res.status(404).json({ success: false, message: 'Product not found.' });
+    if (!prod.is_available) return res.status(400).json({ success: false, message: 'This item is currently unavailable.' });
+    if (prod.stock_quantity < qty) return res.status(400).json({ success: false, message: `Only ${prod.stock_quantity} units available in stock.` });
 
-    if (prod.stock_quantity < qty) {
-      return res.status(400).json({ success: false, message: `Only ${prod.stock_quantity} units available in stock.` });
+    const existing = await CartItem.findOne({ user_id: userId, product_id: prod._id.toString() });
+    if (existing) {
+      existing.quantity = existing.quantity + qty;
+      await existing.save();
+    } else {
+      await CartItem.create({ user_id: userId, product_id: prod._id.toString(), quantity: qty });
     }
-
-    // Insert or update on duplicate
-    await pool.query(
-      `INSERT INTO cart_items (user_id, product_id, quantity) 
-       VALUES (?, ?, ?) 
-       ON DUPLICATE KEY UPDATE quantity = quantity + VALUES(quantity)`,
-      [userId, pId, qty]
-    );
 
     res.json({ success: true, message: `Added ${prod.name} to cart successfully!` });
   } catch (error) {
@@ -70,26 +71,24 @@ router.post('/add', authenticateToken, async (req, res) => {
   }
 });
 
-/**
- * 3. CUSTOMER: Update Cart Item Quantity
- */
+// 3. Update Cart Item Quantity
 router.put('/update', authenticateToken, async (req, res) => {
   const userId = req.user.id;
   const { productId, quantity } = req.body;
-  const pId = parseInt(productId);
   const qty = parseInt(quantity);
-
-  if (qty <= 0) {
-    return res.status(400).json({ success: false, message: 'Quantity must be at least 1.' });
-  }
+  if (qty <= 0) return res.status(400).json({ success: false, message: 'Quantity must be at least 1.' });
 
   try {
-    const [prods] = await pool.query('SELECT stock_quantity FROM products WHERE id = ?', [pId]);
-    if (prods.length > 0 && prods[0].stock_quantity < qty) {
-      return res.status(400).json({ success: false, message: `Only ${prods[0].stock_quantity} units available in stock.` });
+    let pId = productId;
+    if (!mongoose.Types.ObjectId.isValid(productId)) {
+      const prod = await Product.findOne({ legacy_id: parseInt(productId) });
+      if (prod) pId = prod._id.toString();
     }
-
-    await pool.query('UPDATE cart_items SET quantity = ? WHERE user_id = ? AND product_id = ?', [qty, userId, pId]);
+    const prod = await Product.findById(pId);
+    if (prod && prod.stock_quantity < qty) {
+      return res.status(400).json({ success: false, message: `Only ${prod.stock_quantity} units available in stock.` });
+    }
+    await CartItem.findOneAndUpdate({ user_id: userId, product_id: pId }, { quantity: qty });
     res.json({ success: true, message: 'Cart updated successfully.' });
   } catch (error) {
     console.error('Update cart error:', error);
@@ -97,15 +96,16 @@ router.put('/update', authenticateToken, async (req, res) => {
   }
 });
 
-/**
- * 4. CUSTOMER: Remove Item from Cart
- */
+// 4. Remove Item from Cart
 router.delete('/remove/:productId', authenticateToken, async (req, res) => {
   const userId = req.user.id;
-  const productId = parseInt(req.params.productId);
-
+  let pId = req.params.productId;
   try {
-    await pool.query('DELETE FROM cart_items WHERE user_id = ? AND product_id = ?', [userId, productId]);
+    if (!mongoose.Types.ObjectId.isValid(pId)) {
+      const prod = await Product.findOne({ legacy_id: parseInt(pId) });
+      if (prod) pId = prod._id.toString();
+    }
+    await CartItem.findOneAndDelete({ user_id: userId, product_id: pId });
     res.json({ success: true, message: 'Item removed from cart.' });
   } catch (error) {
     console.error('Remove from cart error:', error);
@@ -113,13 +113,11 @@ router.delete('/remove/:productId', authenticateToken, async (req, res) => {
   }
 });
 
-/**
- * 5. CUSTOMER: Clear Cart
- */
+// 5. Clear Cart
 router.delete('/clear', authenticateToken, async (req, res) => {
   const userId = req.user.id;
   try {
-    await pool.query('DELETE FROM cart_items WHERE user_id = ?', [userId]);
+    await CartItem.deleteMany({ user_id: userId });
     res.json({ success: true, message: 'Cart cleared successfully.' });
   } catch (error) {
     console.error('Clear cart error:', error);

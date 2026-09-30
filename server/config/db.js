@@ -1,59 +1,73 @@
-const mysql = require('mysql2/promise');
+const mongoose = require('mongoose');
 const dotenv = require('dotenv');
-const { initializeDatabase } = require('./dbInit');
 
 dotenv.config();
 
-const dbConfig = {
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '3306'),
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD !== undefined ? process.env.DB_PASSWORD : '',
-  database: process.env.DB_NAME || 'sweet_haven_db',
-  waitForConnections: true,
-  connectionLimit: 15,
-  queueLimit: 0,
-  ssl: {
-    rejectUnauthorized: false
-  }
-};
-
-let pool;
+let MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/sweet_haven_db';
 let isConnected = false;
+let mongodInstance = null;
 
-try {
-  pool = mysql.createPool(dbConfig);
-} catch (err) {
-  console.error('❌ Failed to initialize MySQL Pool configuration:', err.message);
-}
+async function connectDB() {
+  if (isConnected && mongoose.connection.readyState === 1) return true;
 
-// Function to initialize tables and check database connectivity
-async function testConnection() {
+  // 1. First attempt: connect to configured MONGO_URI (Atlas or local mongod)
   try {
-    // Run auto-migration / table creation if needed
-    await initializeDatabase();
-
-    if (!pool) {
-      pool = mysql.createPool(dbConfig);
-    }
-    const connection = await pool.getConnection();
-    console.log(`✅ MySQL Connected Successfully to database "${dbConfig.database}" at ${dbConfig.host}:${dbConfig.port}`);
-    connection.release();
+    console.log(`🔌 Attempting MongoDB connection to: ${MONGO_URI}...`);
+    await mongoose.connect(MONGO_URI, {
+      serverSelectionTimeoutMS: 2500,
+      socketTimeoutMS: 30000
+    });
     isConnected = true;
+    console.log(`✅ MongoDB Connected Successfully to "${mongoose.connection.name}" at ${mongoose.connection.host}:${mongoose.connection.port}`);
     return true;
   } catch (error) {
-    console.warn(`⚠️  MySQL Connection Note: Unable to connect to MySQL database at ${dbConfig.host}:${dbConfig.port} (${error.code || error.message}).`);
+    console.warn(`⚠️  External MongoDB not reachable at ${MONGO_URI} (${error.message}).`);
+    console.log('🚀 Initializing built-in MongoDB engine for zero-configuration startup...');
+  }
+
+  // 2. Fallback: Start in-memory MongoDB engine
+  try {
+    const { MongoMemoryServer } = require('mongodb-memory-server');
+    mongodInstance = await MongoMemoryServer.create({
+      instance: { dbName: 'sweet_haven_db' }
+    });
+    const memoryUri = mongodInstance.getUri();
+    MONGO_URI = memoryUri;
+
+    await mongoose.connect(memoryUri, {
+      serverSelectionTimeoutMS: 5000
+    });
+
+    isConnected = true;
+    console.log(`✅ Built-in MongoDB engine connected at: ${memoryUri}`);
+    return true;
+  } catch (memErr) {
+    console.error('❌ Failed to initialize MongoDB:', memErr.message);
     isConnected = false;
     return false;
   }
 }
 
-// Execute initial check
-testConnection();
+mongoose.connection.on('disconnected', () => {
+  isConnected = false;
+  console.warn('⚠️  MongoDB disconnected.');
+});
+
+mongoose.connection.on('reconnected', () => {
+  isConnected = true;
+  console.log('✅ MongoDB reconnected.');
+});
+
+process.on('SIGINT', async () => {
+  if (mongodInstance) {
+    await mongodInstance.stop();
+  }
+  process.exit(0);
+});
 
 module.exports = {
-  pool,
-  testConnection,
+  connectDB,
   getIsConnected: () => isConnected,
-  dbConfig
+  getDB: () => mongoose.connection,
+  getMongoUri: () => MONGO_URI
 };

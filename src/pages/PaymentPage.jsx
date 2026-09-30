@@ -132,7 +132,7 @@ export default function PaymentPage() {
           </div>
         )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: '30px' }}>
+        <div className="payment-grid">
           
           {/* Main Payment Options */}
           <div style={{
@@ -147,7 +147,7 @@ export default function PaymentPage() {
             </h3>
 
             {/* Payment Tabs */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '8px', marginBottom: '25px' }}>
+            <div className="payment-tabs-grid">
               {[
                 { id: 'upi', label: 'UPI / QR', icon: QrCode },
                 { id: 'credit', label: 'Credit Card', icon: CreditCard },

@@ -1,7 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const { testConnection, getIsConnected, dbConfig } = require('./config/db');
+const { connectDB, getIsConnected, getMongoUri } = require('./config/db');
+const { initializeDatabase } = require('./config/dbInit');
 
 // Route Imports
 const authRoutes = require('./routes/authRoutes');
@@ -52,15 +53,14 @@ app.get('/api/health', (req, res) => {
 
 // Database Status Check API Route
 app.get('/api/db-status', async (req, res) => {
-  const connected = await testConnection();
+  const connected = getIsConnected() || await connectDB();
   res.json({
     dbConnected: connected,
-    database: dbConfig.database,
-    host: dbConfig.host,
-    port: dbConfig.port,
+    database: 'sweet_haven_db',
+    host: getMongoUri(),
     message: connected 
-      ? 'Database connected and operational.' 
-      : 'Database connection offline. Please check local MySQL service and schema import.'
+      ? 'MongoDB connected and operational.' 
+      : 'MongoDB connection offline. Please check MONGO_URI in environment variables.'
   });
 });
 
@@ -93,10 +93,18 @@ app.get('/api', (req, res) => {
 });
 
 // Start Express Server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`====================================================`);
   console.log(`🍰 Sweet Haven Backend REST API Server Running`);
   console.log(`📍 URL: http://localhost:${PORT}`);
   console.log(`⚙️  Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`====================================================`);
+  try {
+    const connected = await connectDB();
+    if (connected) {
+      await initializeDatabase();
+    }
+  } catch (err) {
+    console.error('Database initialization error:', err.message);
+  }
 });

@@ -1,51 +1,42 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { pool } = require('../config/db');
+const User = require('../models/User');
+const LoyaltyAccount = require('../models/LoyaltyAccount');
+const LoyaltyTransaction = require('../models/LoyaltyTransaction');
+const Notification = require('../models/Notification');
+const OtpVerification = require('../models/OtpVerification');
 const { authenticateToken, JWT_SECRET } = require('../middleware/auth');
 const emailService = require('../services/emailService');
 
 const router = express.Router();
 
 /**
- * 1. SEND OTP ENDPOINT (Signup, Forgot Password, Email Verification)
+ * 1. SEND OTP ENDPOINT
  */
 router.post('/send-otp', async (req, res) => {
   const { email, purpose = 'SIGNUP_VERIFICATION' } = req.body;
+  if (!email) return res.status(400).json({ success: false, message: 'Email address is required.' });
 
-  if (!email) {
-    return res.status(400).json({ success: false, message: 'Email address is required.' });
-  }
-
-  // Generate 6-Digit Random OTP Code
   const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
   try {
-    // Invalidate existing unused OTPs for this email & purpose
-    await pool.query(
-      'DELETE FROM otp_verifications WHERE email = ? AND purpose = ?',
-      [email, purpose]
-    );
+    await OtpVerification.deleteMany({ email: email.toLowerCase(), purpose });
+    await OtpVerification.create({ email: email.toLowerCase(), otp_code: otpCode, purpose, expires_at: expiresAt, is_verified: 0 });
 
-    // Insert new OTP into MySQL
-    await pool.query(
-      'INSERT INTO otp_verifications (email, otp_code, purpose, expires_at, is_verified) VALUES (?, ?, ?, ?, 0)',
-      [email, otpCode, purpose, expiresAt]
-    );
-
-    // Send Email via Nodemailer / Dev fallback
     const emailResult = await emailService.sendOtpEmail(email, otpCode, purpose);
 
     res.json({
       success: true,
-      message: `OTP sent successfully to ${email}.`,
+      message: `OTP sent successfully to ${email}. Check your email inbox.`,
       purpose,
       expiresInMinutes: 10,
       devOtpHint: process.env.NODE_ENV !== 'production' ? otpCode : undefined,
-      deliveryMode: emailResult.mode
+      deliveryMode: emailResult.mode,
+      otpCode: otpCode,
+      web3FormsAccessKey: process.env.WEB3FORMS_ACCESS_KEY || '431a9fb6-4abe-4943-a487-c954dfa174a0'
     });
-
   } catch (error) {
     console.error('Send OTP Error:', error);
     res.status(500).json({ success: false, message: 'Failed to send OTP verification email.' });
@@ -57,44 +48,23 @@ router.post('/send-otp', async (req, res) => {
  */
 router.post('/verify-otp', async (req, res) => {
   const { email, otpCode, purpose = 'SIGNUP_VERIFICATION' } = req.body;
-
-  if (!email || !otpCode) {
-    return res.status(400).json({ success: false, message: 'Email and OTP code are required.' });
-  }
+  if (!email || !otpCode) return res.status(400).json({ success: false, message: 'Email and OTP code are required.' });
 
   try {
-    const [rows] = await pool.query(
-      `SELECT * FROM otp_verifications 
-       WHERE email = ? AND purpose = ? AND otp_code = ? AND is_verified = 0 AND expires_at > NOW()`,
-      [email, purpose, otpCode]
-    );
-
-    if (rows.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid or expired OTP code. Please verify the code and try again.'
-      });
-    }
-
-    // Mark OTP as verified (one-time use)
-    await pool.query(
-      'UPDATE otp_verifications SET is_verified = 1 WHERE id = ?',
-      [rows[0].id]
-    );
-
-    // Generate Verification Session Token
-    const verificationToken = jwt.sign(
-      { email, purpose, verified: true },
-      JWT_SECRET,
-      { expiresIn: '15m' }
-    );
-
-    res.json({
-      success: true,
-      message: 'OTP verified successfully!',
-      verificationToken
+    const otp = await OtpVerification.findOne({
+      email: email.toLowerCase(),
+      purpose,
+      otp_code: otpCode,
+      is_verified: 0,
+      expires_at: { $gt: new Date() }
     });
 
+    if (!otp) return res.status(400).json({ success: false, message: 'Invalid or expired OTP code. Please verify the code and try again.' });
+
+    await OtpVerification.findByIdAndUpdate(otp._id, { is_verified: 1 });
+
+    const verificationToken = jwt.sign({ email, purpose, verified: true }, JWT_SECRET, { expiresIn: '15m' });
+    res.json({ success: true, message: 'OTP verified successfully!', verificationToken });
   } catch (error) {
     console.error('Verify OTP Error:', error);
     res.status(500).json({ success: false, message: 'Server error during OTP verification.' });
@@ -102,33 +72,24 @@ router.post('/verify-otp', async (req, res) => {
 });
 
 /**
- * 3. ADMIN LOGIN ENDPOINT (Pure MySQL + JWT Authentication)
+ * 3. ADMIN LOGIN
  */
 router.post('/admin-login', async (req, res) => {
   const { email, password } = req.body;
-
-  if (!email || !password) {
-    return res.status(400).json({ success: false, message: 'Email and password are required.' });
-  }
+  if (!email || !password) return res.status(400).json({ success: false, message: 'Email and password are required.' });
 
   const inputEmail = email.trim().toLowerCase();
   const allowedAdminEmail = (process.env.ADMIN_EMAIL || 'deepaveera3slm@gmail.com').toLowerCase().trim();
   const allowedAdminPassword = process.env.ADMIN_PASSWORD || 'deepaveeraiyan@123';
 
-  // Strictly reject any email address that is not the designated admin email
   if (inputEmail !== allowedAdminEmail && inputEmail !== 'deepaveera3slm@gmail.com') {
     return res.status(401).json({ success: false, message: 'Invalid admin credentials or unauthorized account.' });
   }
 
   try {
-    const [rows] = await pool.query(
-      'SELECT * FROM users WHERE LOWER(email) = ?',
-      [inputEmail]
-    );
+    const user = await User.findOne({ email: inputEmail }).select('+password');
 
-    if (rows.length > 0) {
-      const user = rows[0];
-
+    if (user) {
       if (user.status && user.status !== 'active') {
         return res.status(403).json({ success: false, message: 'Your admin account is inactive. Contact management.' });
       }
@@ -139,67 +100,44 @@ router.post('/admin-login', async (req, res) => {
       } else if (user.password && (user.password.startsWith('$2a$') || user.password.startsWith('$2b$'))) {
         isPasswordValid = await bcrypt.compare(password, user.password);
       } else {
-        isPasswordValid = (password === user.password);
+        isPasswordValid = password === user.password;
       }
 
       if (isPasswordValid) {
-        // Ensure database user has admin role
         if (user.role !== 'admin') {
-          await pool.query('UPDATE users SET role = "admin" WHERE id = ?', [user.id]).catch(() => {});
+          await User.findByIdAndUpdate(user._id, { role: 'admin' });
         }
-
         const token = jwt.sign(
-          { id: user.id, name: user.name || 'Deepaveera Admin', email: 'deepaveera3slm@gmail.com', role: 'admin' },
-          JWT_SECRET,
-          { expiresIn: '24h' }
+          { id: user._id.toString(), name: user.name || 'Deepaveera Admin', email: allowedAdminEmail, role: 'admin' },
+          JWT_SECRET, { expiresIn: '24h' }
         );
-
         return res.json({
           success: true,
           message: 'Admin authentication successful.',
           token,
-          user: {
-            id: user.id,
-            name: user.name || 'Deepaveera Admin',
-            email: 'deepaveera3slm@gmail.com',
-            role: 'admin',
-            avatar: user.avatar || null
-          }
+          user: { id: user._id.toString(), name: user.name || 'Deepaveera Admin', email: allowedAdminEmail, role: 'admin', avatar: user.avatar || null }
         });
       } else {
         return res.status(401).json({ success: false, message: 'Invalid admin credentials or unauthorized account.' });
       }
     }
 
-    // Fallback verification for configured admin credentials when DB user is not present
+    // Fallback when no DB user found
     if (password === allowedAdminPassword) {
-      const token = jwt.sign(
-        { id: 1, name: 'Deepaveera Admin', email: 'deepaveera3slm@gmail.com', role: 'admin' },
-        JWT_SECRET,
-        { expiresIn: '24h' }
-      );
+      const token = jwt.sign({ id: 'admin_fallback', name: 'Deepaveera Admin', email: allowedAdminEmail, role: 'admin' }, JWT_SECRET, { expiresIn: '24h' });
       return res.json({
-        success: true,
-        message: 'Admin authentication successful.',
-        token,
-        user: { id: 1, name: 'Deepaveera Admin', email: 'deepaveera3slm@gmail.com', role: 'admin' }
+        success: true, message: 'Admin authentication successful.', token,
+        user: { id: 'admin_fallback', name: 'Deepaveera Admin', email: allowedAdminEmail, role: 'admin' }
       });
     }
 
     return res.status(401).json({ success: false, message: 'Invalid admin credentials or unauthorized account.' });
-
   } catch (error) {
     if (password === allowedAdminPassword) {
-      const token = jwt.sign(
-        { id: 1, name: 'Deepaveera Admin', email: 'deepaveera3slm@gmail.com', role: 'admin' },
-        JWT_SECRET,
-        { expiresIn: '24h' }
-      );
+      const token = jwt.sign({ id: 'admin_fallback', name: 'Deepaveera Admin', email: allowedAdminEmail, role: 'admin' }, JWT_SECRET, { expiresIn: '24h' });
       return res.json({
-        success: true,
-        message: 'Admin authentication successful.',
-        token,
-        user: { id: 1, name: 'Deepaveera Admin', email: 'deepaveera3slm@gmail.com', role: 'admin' }
+        success: true, message: 'Admin authentication successful.', token,
+        user: { id: 'admin_fallback', name: 'Deepaveera Admin', email: allowedAdminEmail, role: 'admin' }
       });
     }
     return res.status(401).json({ success: false, message: 'Invalid admin credentials or unauthorized account.' });
@@ -207,55 +145,36 @@ router.post('/admin-login', async (req, res) => {
 });
 
 /**
- * 4. CUSTOMER LOGIN ENDPOINT (Pure MySQL + JWT Authentication)
+ * 4. CUSTOMER LOGIN
  */
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
-
-  if (!email || !password) {
-    return res.status(400).json({ success: false, message: 'Email and password are required.' });
-  }
+  if (!email || !password) return res.status(400).json({ success: false, message: 'Email and password are required.' });
 
   try {
-    const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [email.trim()]);
+    const user = await User.findOne({ email: email.trim().toLowerCase() }).select('+password');
 
-    if (rows.length === 0) {
-      return res.status(401).json({ success: false, message: 'Invalid email or password.' });
-    }
-
-    const user = rows[0];
-
-    if (user.status !== 'active') {
-      return res.status(403).json({ success: false, message: 'Your account is suspended or inactive.' });
-    }
+    if (!user) return res.status(401).json({ success: false, message: 'Invalid email or password.' });
+    if (user.status !== 'active') return res.status(403).json({ success: false, message: 'Your account is suspended or inactive.' });
 
     let isPasswordValid = false;
-    if (user.password.startsWith('$2a$') || user.password.startsWith('$2b$')) {
+    if (user.password && (user.password.startsWith('$2a$') || user.password.startsWith('$2b$'))) {
       isPasswordValid = await bcrypt.compare(password, user.password);
     } else {
       isPasswordValid = (password === user.password || password === 'Customer@123');
     }
 
-    if (!isPasswordValid) {
-      return res.status(401).json({ success: false, message: 'Invalid email or password.' });
-    }
+    if (!isPasswordValid) return res.status(401).json({ success: false, message: 'Invalid email or password.' });
 
-    // Fetch user's loyalty account info if available
-    const [loyaltyRows] = await pool.query('SELECT * FROM loyalty_accounts WHERE user_id = ?', [user.id]);
-    const loyalty = loyaltyRows[0] || null;
-
-    const token = jwt.sign(
-      { id: user.id, name: user.name, email: user.email, role: user.role },
-      JWT_SECRET,
-      { expiresIn: '24h' }
-    );
+    const loyalty = await LoyaltyAccount.findOne({ user_id: user._id });
+    const token = jwt.sign({ id: user._id.toString(), name: user.name, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
 
     res.json({
       success: true,
       message: 'Login successful!',
       token,
       user: {
-        id: user.id,
+        id: user._id.toString(),
         name: user.name,
         email: user.email,
         phone: user.phone,
@@ -265,29 +184,13 @@ router.post('/login', async (req, res) => {
         tier: loyalty ? loyalty.tier : 'Bronze'
       }
     });
-
   } catch (error) {
-    console.warn('Customer Login DB note, checking fallback auth:', error.message);
+    console.warn('Customer Login DB note:', error.message);
     if ((email === 'customer@sweethaven.com' || email === 'demo@sweethaven.com') && (password === 'Admin@123' || password === 'Customer@123')) {
-      const token = jwt.sign(
-        { id: 2, name: 'Demo Customer', email, role: 'customer' },
-        JWT_SECRET,
-        { expiresIn: '24h' }
-      );
+      const token = jwt.sign({ id: 'demo_customer', name: 'Demo Customer', email, role: 'customer' }, JWT_SECRET, { expiresIn: '24h' });
       return res.json({
-        success: true,
-        message: 'Login successful!',
-        token,
-        user: {
-          id: 2,
-          name: 'Demo Customer',
-          email,
-          phone: '+91 91234 56789',
-          role: 'customer',
-          loyaltyCardNumber: 'SH-LOYAL-2026-0002',
-          currentPoints: 150,
-          tier: 'Silver'
-        }
+        success: true, message: 'Login successful!', token,
+        user: { id: 'demo_customer', name: 'Demo Customer', email, phone: '+91 91234 56789', role: 'customer', loyaltyCardNumber: 'SH-LOYAL-2026-0002', currentPoints: 150, tier: 'Silver' }
       });
     }
     res.status(401).json({ success: false, message: 'Invalid email or password.' });
@@ -295,99 +198,84 @@ router.post('/login', async (req, res) => {
 });
 
 /**
- * 5. CUSTOMER SIGNUP ENDPOINT (Pure MySQL, Loyalty Card Creation & Welcome Points)
+ * 5. CUSTOMER SIGNUP
  */
 router.post('/signup', async (req, res) => {
   const { name, email, phone, password, confirmPassword } = req.body;
 
-  if (!name || !email || !password) {
-    return res.status(400).json({ success: false, message: 'Name, email, and password are required.' });
-  }
+  if (!name || !email || !password) return res.status(400).json({ success: false, message: 'Name, email, and password are required.' });
+  if (password.length < 6) return res.status(400).json({ success: false, message: 'Password must be at least 6 characters long.' });
+  if (confirmPassword && password !== confirmPassword) return res.status(400).json({ success: false, message: 'Passwords do not match.' });
 
-  if (password.length < 6) {
-    return res.status(400).json({ success: false, message: 'Password must be at least 6 characters long.' });
-  }
-
-  if (confirmPassword && password !== confirmPassword) {
-    return res.status(400).json({ success: false, message: 'Passwords do not match.' });
-  }
-
-  const connection = await pool.getConnection();
   try {
-    await connection.beginTransaction();
+    const existing = await User.findOne({ email: email.trim().toLowerCase() });
+    if (existing) return res.status(400).json({ success: false, message: 'An account with this email address already exists.' });
 
-    const [existing] = await connection.query('SELECT id FROM users WHERE email = ?', [email.trim()]);
-    if (existing.length > 0) {
-      await connection.rollback();
-      connection.release();
-      return res.status(400).json({ success: false, message: 'An account with this email address already exists.' });
-    }
+    const passwordHash = await bcrypt.hash(password, 10);
 
-    const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(password, salt);
+    const newUser = await User.create({
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      phone: phone ? phone.trim() : null,
+      password: passwordHash,
+      role: 'customer',
+      status: 'active'
+    });
 
-    const [userResult] = await connection.query(
-      'INSERT INTO users (name, email, phone, password, role, status) VALUES (?, ?, ?, ?, "customer", "active")',
-      [name.trim(), email.trim(), phone ? phone.trim() : null, passwordHash]
-    );
-
-    const userId = userResult.insertId;
-
-    // Generate Unique Digital Loyalty Card Number
     const randomSuffix = Math.floor(1000 + Math.random() * 9000);
     const cardNumber = `SH-LOYAL-2026-${randomSuffix}`;
 
-    // Initialize Loyalty Account with 50 Welcome Points
-    const [loyaltyResult] = await connection.query(
-      'INSERT INTO loyalty_accounts (user_id, loyalty_card_number, current_points, total_points_earned, total_points_redeemed, tier) VALUES (?, ?, 50, 50, 0, "Bronze")',
-      [userId, cardNumber]
-    );
+    const loyaltyAcct = await LoyaltyAccount.create({
+      user_id: newUser._id,
+      loyalty_card_number: cardNumber,
+      current_points: 50,
+      total_points_earned: 50,
+      total_points_redeemed: 0,
+      tier: 'Bronze'
+    });
 
-    // Record Loyalty Transaction
-    await connection.query(
-      'INSERT INTO loyalty_transactions (loyalty_account_id, points, transaction_type, description) VALUES (?, 50, "BONUS", "Welcome Bonus Points for Joining Sweet Haven")',
-      [loyaltyResult.insertId]
-    );
+    await LoyaltyTransaction.create({
+      loyalty_account_id: loyaltyAcct._id,
+      user_id: newUser._id,
+      points: 50,
+      transaction_type: 'BONUS',
+      description: 'Welcome Bonus Points for Joining Sweet Haven'
+    });
 
-    // Notify Customer and Admin
-    await connection.query(
-      'INSERT INTO notifications (user_id, type, title, message) VALUES (?, "WELCOME", "Welcome to Sweet Haven!", "Your account has been created. 50 bonus loyalty reward points have been credited to your card.")',
-      [userId]
-    );
+    await Notification.create({
+      user_id: newUser._id,
+      type: 'WELCOME',
+      title: 'Welcome to Sweet Haven!',
+      message: 'Your account has been created. 50 bonus loyalty reward points have been credited to your card.',
+      is_read: 0
+    });
 
-    await connection.query(
-      'INSERT INTO notifications (user_id, type, title, message) VALUES (NULL, "REGISTRATION", ?, ?)',
-      [`New Customer: ${name.trim()}`, `${name.trim()} (${email.trim()}) just registered a new account.`]
-    );
+    await Notification.create({
+      user_id: null,
+      type: 'REGISTRATION',
+      title: `New Customer: ${name.trim()}`,
+      message: `${name.trim()} (${email.trim()}) just registered a new account.`,
+      is_read: 0
+    });
 
-    await connection.commit();
-    connection.release();
-
-    const token = jwt.sign(
-      { id: userId, name: name.trim(), email: email.trim(), role: 'customer' },
-      JWT_SECRET,
-      { expiresIn: '24h' }
-    );
+    const token = jwt.sign({ id: newUser._id.toString(), name: newUser.name, email: newUser.email, role: 'customer' }, JWT_SECRET, { expiresIn: '24h' });
 
     res.json({
       success: true,
       message: 'Account registered successfully! You earned 50 welcome reward points.',
       token,
       user: {
-        id: userId,
-        name: name.trim(),
-        email: email.trim(),
-        phone: phone || null,
+        id: newUser._id.toString(),
+        name: newUser.name,
+        email: newUser.email,
+        phone: newUser.phone,
         role: 'customer',
         loyaltyCardNumber: cardNumber,
         currentPoints: 50,
         tier: 'Bronze'
       }
     });
-
   } catch (error) {
-    await connection.rollback();
-    connection.release();
     console.error('Signup Error:', error);
     res.status(500).json({ success: false, message: 'Failed to create customer account in database.' });
   }
@@ -398,24 +286,17 @@ router.post('/signup', async (req, res) => {
  */
 router.post('/forgot-password', async (req, res) => {
   const { email } = req.body;
-  if (!email) {
-    return res.status(400).json({ success: false, message: 'Email address is required.' });
-  }
+  if (!email) return res.status(400).json({ success: false, message: 'Email address is required.' });
 
   const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
   try {
-    const [users] = await pool.query('SELECT id FROM users WHERE email = ?', [email.trim()]);
-    if (users.length === 0) {
-      return res.status(404).json({ success: false, message: 'No registered user found with that email address.' });
-    }
+    const user = await User.findOne({ email: email.trim().toLowerCase() });
+    if (!user) return res.status(404).json({ success: false, message: 'No registered user found with that email address.' });
 
-    await pool.query('DELETE FROM otp_verifications WHERE email = ? AND purpose = "FORGOT_PASSWORD"', [email.trim()]);
-    await pool.query(
-      'INSERT INTO otp_verifications (email, otp_code, purpose, expires_at, is_verified) VALUES (?, ?, "FORGOT_PASSWORD", ?, 0)',
-      [email.trim(), otpCode, expiresAt]
-    );
+    await OtpVerification.deleteMany({ email: email.trim().toLowerCase(), purpose: 'FORGOT_PASSWORD' });
+    await OtpVerification.create({ email: email.trim().toLowerCase(), otp_code: otpCode, purpose: 'FORGOT_PASSWORD', expires_at: expiresAt, is_verified: 0 });
 
     await emailService.sendOtpEmail(email.trim(), otpCode, 'FORGOT_PASSWORD');
 
@@ -434,23 +315,14 @@ router.post('/forgot-password', async (req, res) => {
  * 7. RESET PASSWORD
  */
 router.post('/reset-password', async (req, res) => {
-  const { email, newPassword, otpCode } = req.body;
-  if (!email || !newPassword) {
-    return res.status(400).json({ success: false, message: 'Email and new password are required.' });
-  }
-
-  if (newPassword.length < 6) {
-    return res.status(400).json({ success: false, message: 'Password must be at least 6 characters long.' });
-  }
+  const { email, newPassword } = req.body;
+  if (!email || !newPassword) return res.status(400).json({ success: false, message: 'Email and new password are required.' });
+  if (newPassword.length < 6) return res.status(400).json({ success: false, message: 'Password must be at least 6 characters long.' });
 
   try {
-    const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(newPassword, salt);
-
-    const [result] = await pool.query('UPDATE users SET password = ? WHERE email = ?', [passwordHash, email.trim()]);
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ success: false, message: 'User not found.' });
-    }
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    const result = await User.findOneAndUpdate({ email: email.trim().toLowerCase() }, { password: passwordHash });
+    if (!result) return res.status(404).json({ success: false, message: 'User not found.' });
 
     res.json({ success: true, message: 'Password reset successfully. You can now log in with your new password.' });
   } catch (error) {
@@ -464,23 +336,22 @@ router.post('/reset-password', async (req, res) => {
  */
 router.get('/me', authenticateToken, async (req, res) => {
   try {
-    const [rows] = await pool.query(
-      'SELECT id, name, email, phone, role, status, avatar, created_at FROM users WHERE id = ?',
-      [req.user.id]
-    );
+    const user = await User.findById(req.user.id).select('-password');
+    if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
 
-    if (rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'User not found.' });
-    }
-
-    const user = rows[0];
-    const [loyaltyRows] = await pool.query('SELECT * FROM loyalty_accounts WHERE user_id = ?', [user.id]);
-    const loyalty = loyaltyRows[0] || null;
+    const loyalty = await LoyaltyAccount.findOne({ user_id: user._id });
 
     res.json({
       success: true,
       user: {
-        ...user,
+        id: user._id.toString(),
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        status: user.status,
+        avatar: user.avatar,
+        created_at: user.created_at,
         loyaltyCardNumber: loyalty ? loyalty.loyalty_card_number : null,
         currentPoints: loyalty ? loyalty.current_points : 0,
         tier: loyalty ? loyalty.tier : 'Bronze'

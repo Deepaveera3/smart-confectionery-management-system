@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Cake, Phone, Mail, MapPin, Award, Heart } from 'lucide-react';
+import ContactModal from './ContactModal';
 
 export default function Footer() {
+  const [contactOpen, setContactOpen] = useState(false);
   return (
     <footer className="footer">
       <div className="container">
@@ -56,11 +58,44 @@ export default function Footer() {
               </li>
               <li style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <Mail size={16} style={{ color: 'var(--gold-primary)' }} />
-                <span>orders@sweethaven.com</span>
+                <button
+                  onClick={() => setContactOpen(true)}
+                  style={{ background: 'none', border: 'none', color: 'inherit', font: 'inherit', padding: 0, cursor: 'pointer', textDecoration: 'underline' }}
+                >
+                  orders@sweethaven.com (Send Message)
+                </button>
+              </li>
+              <li>
+                <button
+                  onClick={() => setContactOpen(true)}
+                  className="footer-contact-btn"
+                  style={{
+                    marginTop: '0.6rem',
+                    padding: '0.55rem 1.15rem',
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    borderRadius: '50px',
+                    background: 'linear-gradient(135deg, #D4AF37 0%, #F3E0A3 50%, #B8860B 100%)',
+                    color: '#2A1710',
+                    border: '1px solid rgba(212, 175, 55, 0.5)',
+                    boxShadow: '0 4px 15px rgba(212, 175, 55, 0.35)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.25s ease'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+                  onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+                >
+                  ✉️ Contact Us
+                </button>
               </li>
             </ul>
           </div>
         </div>
+
+        <ContactModal isOpen={contactOpen} onClose={() => setContactOpen(false)} />
 
         {/* Footer Bottom */}
         <div className="footer-bottom">

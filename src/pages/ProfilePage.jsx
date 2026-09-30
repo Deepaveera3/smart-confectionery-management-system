@@ -168,9 +168,9 @@ export default function ProfilePage() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: '2rem' }}>
+      <div className="profile-grid">
         {/* Sidebar Tabs */}
-        <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-gold)', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.4rem', height: 'fit-content' }}>
+        <div className="profile-sidebar">
           <button 
             className={`admin-nav-item ${activeTab === 'dashboard' ? 'active' : ''}`}
             onClick={() => setActiveTab('dashboard')}
@@ -217,7 +217,7 @@ export default function ProfilePage() {
           {activeTab === 'dashboard' && (
             <div>
               {/* Customer Profile & Digital Loyalty Card Summary */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '2rem' }}>
+              <div className="form-grid-2" style={{ marginBottom: '2rem' }}>
                 <div style={{ backgroundColor: '#f8fafc', padding: '20px', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
                   <span style={{ fontSize: '12px', fontWeight: '800', color: '#be185d', textTransform: 'uppercase' }}>Profile Summary</span>
                   <h3 style={{ fontSize: '20px', fontWeight: '800', color: '#0f172a', margin: '4px 0 8px 0' }}>{profileData.name || customerUser?.name || 'Valued Customer'}</h3>
@@ -431,7 +431,7 @@ export default function ProfilePage() {
               <input type="tel" required value={newAddress.phone} onChange={e => setNewAddress({ ...newAddress, phone: e.target.value })} placeholder="Contact Phone Number" style={{ width: '100%', padding: '0.65rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }} />
               <input type="text" required value={newAddress.address_line1} onChange={e => setNewAddress({ ...newAddress, address_line1: e.target.value })} placeholder="House / Flat / Street Address" style={{ width: '100%', padding: '0.65rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }} />
               <input type="text" value={newAddress.address_line2} onChange={e => setNewAddress({ ...newAddress, address_line2: e.target.value })} placeholder="Landmark / Area (Optional)" style={{ width: '100%', padding: '0.65rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }} />
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+              <div className="form-grid-2">
                 <input type="text" required value={newAddress.city} onChange={e => setNewAddress({ ...newAddress, city: e.target.value })} placeholder="City" style={{ width: '100%', padding: '0.65rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }} />
                 <input type="text" required value={newAddress.pincode} onChange={e => setNewAddress({ ...newAddress, pincode: e.target.value })} placeholder="Pincode" style={{ width: '100%', padding: '0.65rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }} />
               </div>

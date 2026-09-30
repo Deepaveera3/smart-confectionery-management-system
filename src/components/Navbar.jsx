@@ -117,16 +117,16 @@ export default function Navbar({ onOpenSearch }) {
 
           {customerUser ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <Link to="/profile" className="btn btn-outline" style={{ padding: '0.4rem 0.8rem', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+              <Link to="/profile" className="btn btn-outline desktop-only-action" style={{ padding: '0.4rem 0.8rem', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                 <UserCheck size={15} /> {customerUser.name?.split(' ')[0] || 'Profile'}
               </Link>
-              <Link to="/my-orders" className="icon-btn" title="My Orders">
+              <Link to="/my-orders" className="icon-btn desktop-only-action" title="My Orders">
                 <Package size={18} />
               </Link>
-              <Link to="/payment-history" className="icon-btn" title="Payment History">
+              <Link to="/payment-history" className="icon-btn desktop-only-action" title="Payment History">
                 <CreditCard size={18} />
               </Link>
-              <button onClick={handleLogout} className="icon-btn" title="Sign Out">
+              <button onClick={handleLogout} className="icon-btn desktop-only-action" title="Sign Out">
                 <LogOut size={16} style={{ color: '#c0392b' }} />
               </button>
             </div>

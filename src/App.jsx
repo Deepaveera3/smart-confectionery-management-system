@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navbar';
+import ChatBot from './components/ChatBot';
 import Footer from './components/Footer';
 import HomePage from './pages/HomePage';
 import ProductsPage from './pages/ProductsPage';
@@ -60,6 +61,7 @@ function AppContent() {
         </Routes>
       </main>
       <Footer />
+      <ChatBot />
     </div>
   );
 }

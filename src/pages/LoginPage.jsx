@@ -288,6 +288,7 @@ export default function LoginPage() {
         isOpen={otpModalOpen}
         onClose={() => setOtpModalOpen(false)}
         email={email}
+        name={name}
         purpose={otpPurpose}
         onVerified={handleOtpVerified}
         title={otpPurpose === 'SIGNUP_VERIFICATION' ? 'Customer Signup Email OTP' : 'Reset Password Email OTP'}

@@ -46,7 +46,7 @@ export default function CartPage() {
       </div>
 
       {cartItems.length > 0 ? (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: '2rem' }}>
+        <div className="cart-grid">
           {/* Items List */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
             {cartItems.map(item => {
@@ -55,30 +55,18 @@ export default function CartPage() {
               const isLowStock = (item.stock_quantity ?? 10) <= 5;
 
               return (
-                <div 
-                  key={item.id}
-                  style={{
-                    background: 'var(--bg-surface)',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid var(--border-light)',
-                    padding: '1.25rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '1.25rem',
-                    boxShadow: 'var(--shadow-sm)'
-                  }}
-                >
+                <div key={item.id} className="cart-item-card">
                   <img 
                     src={item.image || '/hero_cake.jpg'} 
                     alt={item.name} 
-                    style={{ width: '90px', height: '90px', borderRadius: 'var(--radius-sm)', objectFit: 'cover' }} 
+                    className="cart-item-img"
                     onError={(e) => {
                       e.target.onerror = null;
                       e.target.src = '/hero_cake.jpg';
                     }}
                   />
 
-                  <div style={{ flex: 1 }}>
+                  <div className="cart-item-info">
                     <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--burgundy-royal)', textTransform: 'uppercase' }}>
                       {item.category}
                     </span>
@@ -95,45 +83,47 @@ export default function CartPage() {
                     )}
                   </div>
 
-                  {/* Quantity Controls */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'var(--bg-cream-soft)', padding: '0.35rem 0.65rem', borderRadius: 'var(--radius-full)', border: '1px solid var(--border-light)' }}>
-                    <button 
-                      onClick={() => updateQuantity(item.id, item.quantity - 1)}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', color: 'var(--chocolate-dark)' }}
-                    >
-                      <Minus size={15} />
-                    </button>
-                    <span style={{ fontWeight: 700, fontSize: '0.95rem', minWidth: '24px', textAlign: 'center' }}>
-                      {item.quantity}
-                    </span>
-                    <button 
-                      onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', color: 'var(--chocolate-dark)' }}
-                    >
-                      <Plus size={15} />
-                    </button>
-                  </div>
-
-                  {/* Item Pricing */}
-                  <div style={{ textAlign: 'right', minWidth: '100px' }}>
-                    <div style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--burgundy-royal)' }}>
-                      ₹{itemTotal}
+                  <div className="cart-item-actions">
+                    {/* Quantity Controls */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'var(--bg-cream-soft)', padding: '0.35rem 0.65rem', borderRadius: 'var(--radius-full)', border: '1px solid var(--border-light)' }}>
+                      <button 
+                        onClick={() => updateQuantity(item.id, item.quantity - 1)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', color: 'var(--chocolate-dark)' }}
+                      >
+                        <Minus size={15} />
+                      </button>
+                      <span style={{ fontWeight: 700, fontSize: '0.95rem', minWidth: '24px', textAlign: 'center' }}>
+                        {item.quantity}
+                      </span>
+                      <button 
+                        onClick={() => updateQuantity(item.id, item.quantity + 1)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', color: 'var(--chocolate-dark)' }}
+                      >
+                        <Plus size={15} />
+                      </button>
                     </div>
-                    {item.discount > 0 && (
-                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textDecoration: 'line-through' }}>
-                        ₹{item.price * item.quantity}
-                      </div>
-                    )}
-                  </div>
 
-                  {/* Remove Button */}
-                  <button 
-                    onClick={() => removeFromCart(item.id)}
-                    style={{ background: 'none', border: 'none', color: '#c0392b', cursor: 'pointer', padding: '0.4rem' }}
-                    title="Remove item"
-                  >
-                    <Trash2 size={18} />
-                  </button>
+                    {/* Item Pricing */}
+                    <div style={{ textAlign: 'right', minWidth: '85px' }}>
+                      <div style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--burgundy-royal)' }}>
+                        ₹{itemTotal}
+                      </div>
+                      {item.discount > 0 && (
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textDecoration: 'line-through' }}>
+                          ₹{item.price * item.quantity}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Remove Button */}
+                    <button 
+                      onClick={() => removeFromCart(item.id)}
+                      style={{ background: 'none', border: 'none', color: '#c0392b', cursor: 'pointer', padding: '0.4rem' }}
+                      title="Remove item"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
                 </div>
               );
             })}

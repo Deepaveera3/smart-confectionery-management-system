@@ -311,7 +311,7 @@ export default function CheckoutPage() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 400px', gap: '2rem' }}>
+      <div className="checkout-grid">
         {/* Left Column: Delivery Address & Options */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
           {/* Step 1: Delivery Address */}
@@ -366,12 +366,12 @@ export default function CheckoutPage() {
                     }));
                   }}
                 />
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
+                <div className="form-grid-2">
                   <input type="text" placeholder="Recipient Name" value={newAddr.full_name} onChange={e => setNewAddr({ ...newAddr, full_name: e.target.value })} style={{ padding: '0.65rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }} />
                   <input type="tel" placeholder="Phone Number" value={newAddr.phone} onChange={e => setNewAddr({ ...newAddr, phone: e.target.value })} style={{ padding: '0.65rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }} />
                 </div>
                 <input type="text" placeholder="Flat / House / Street Address" value={newAddr.address_line1} onChange={e => setNewAddr({ ...newAddr, address_line1: e.target.value })} style={{ padding: '0.65rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }} />
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.85rem' }}>
+                <div className="form-grid-3">
                   <input type="text" placeholder="City" value={newAddr.city} onChange={e => setNewAddr({ ...newAddr, city: e.target.value })} style={{ padding: '0.65rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }} />
                   <input type="text" placeholder="State" value={newAddr.state} onChange={e => setNewAddr({ ...newAddr, state: e.target.value })} style={{ padding: '0.65rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }} />
                   <input type="text" placeholder="Pincode" value={newAddr.pincode} onChange={e => setNewAddr({ ...newAddr, pincode: e.target.value })} style={{ padding: '0.65rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }} />

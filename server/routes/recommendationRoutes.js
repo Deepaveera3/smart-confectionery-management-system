@@ -1,22 +1,21 @@
 const express = require('express');
-const { pool } = require('../config/db');
+const Product = require('../models/Product');
 
 const router = express.Router();
 
 /**
- * GET /api/recommendations
+ * GET /api/recommendations (MongoDB)
  * Query params: flavor, occasion, maxPrice
  */
 router.get('/', async (req, res) => {
   const { flavor = 'All', occasion = 'All', maxPrice = 2000 } = req.query;
 
   try {
-    const [allProducts] = await pool.query(
-      `SELECT p.*, c.name as category 
-       FROM products p 
-       JOIN categories c ON p.category_id = c.id 
-       WHERE p.is_available = 1 AND c.is_active = 1`
-    );
+    const rawProducts = await Product.find({ is_available: 1 }).lean();
+    const allProducts = rawProducts.map(p => ({
+      ...p,
+      id: p._id.toString()
+    }));
 
     const priceLimit = parseFloat(maxPrice) || 2000;
     const budgetFiltered = allProducts.filter(p => parseFloat(p.price) <= priceLimit);
@@ -26,7 +25,7 @@ router.get('/', async (req, res) => {
     if (flavor !== 'All') {
       const flavorLower = flavor.toLowerCase();
       recommendedForYou = budgetFiltered.filter(p => 
-        p.name.toLowerCase().includes(flavorLower) || 
+        (p.name && p.name.toLowerCase().includes(flavorLower)) || 
         (p.description && p.description.toLowerCase().includes(flavorLower)) ||
         (p.ingredients && p.ingredients.toLowerCase().includes(flavorLower)) ||
         (p.category && p.category.toLowerCase().includes(flavorLower))
@@ -36,12 +35,12 @@ router.get('/', async (req, res) => {
 
     // 2. Trending Products (Best sellers & Featured)
     const trendingProducts = budgetFiltered
-      .filter(p => p.is_best_seller || p.is_featured || parseFloat(p.rating) >= 4.8)
+      .filter(p => p.is_best_seller || p.is_featured || parseFloat(p.rating || 0) >= 4.8)
       .slice(0, 4);
 
     // 3. Frequently Bought Together
-    const cakeItems = budgetFiltered.filter(p => p.category === 'Cakes' || p.name.includes('Cake'));
-    const pairingItems = budgetFiltered.filter(p => p.category !== 'Cakes' && !p.name.includes('Cake'));
+    const cakeItems = budgetFiltered.filter(p => (p.category && p.category.toLowerCase().includes('cake')) || (p.name && p.name.toLowerCase().includes('cake')));
+    const pairingItems = budgetFiltered.filter(p => (!p.category || !p.category.toLowerCase().includes('cake')) && (!p.name || !p.name.toLowerCase().includes('cake')));
     
     const frequentlyBoughtTogether = [];
     if (cakeItems.length > 0) frequentlyBoughtTogether.push(cakeItems[0]);

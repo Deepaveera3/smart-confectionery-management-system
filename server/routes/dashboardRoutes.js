@@ -1,45 +1,67 @@
 const express = require('express');
-const { pool } = require('../config/db');
+const Product = require('../models/Product');
+const Order = require('../models/Order');
+const User = require('../models/User');
+const Coupon = require('../models/Coupon');
+const LoyaltyTransaction = require('../models/LoyaltyTransaction');
+const Category = require('../models/Category');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
 
 /**
- * 1. ADMIN: Dashboard Analytics Overview Metrics (Pure Live MySQL)
+ * 1. ADMIN: Dashboard Analytics Overview Metrics (MongoDB)
  */
 async function handleGetMetrics(req, res) {
   try {
-    const [[{ totalProducts }]] = await pool.query('SELECT COUNT(*) as totalProducts FROM products');
-    const [[{ totalOrders }]] = await pool.query('SELECT COUNT(*) as totalOrders FROM orders');
-    const [[{ totalCustomers }]] = await pool.query('SELECT COUNT(*) as totalCustomers FROM users WHERE role = "customer"');
-    const [[{ totalRevenue }]] = await pool.query('SELECT COALESCE(SUM(final_amount), 0) as totalRevenue FROM orders WHERE payment_status = "Successful"');
-    const [[{ todaysSales }]] = await pool.query('SELECT COALESCE(SUM(final_amount), 0) as todaysSales FROM orders WHERE payment_status = "Successful" AND DATE(created_at) = CURDATE()');
-    const [[{ pendingOrders }]] = await pool.query('SELECT COUNT(*) as pendingOrders FROM orders WHERE order_status NOT IN ("Delivered", "Cancelled")');
-    const [[{ lowStockCount }]] = await pool.query(
-      `SELECT COUNT(p.id) as lowStockCount 
-       FROM products p 
-       LEFT JOIN inventory i ON p.id = i.product_id 
-       WHERE p.stock_quantity <= COALESCE(i.min_threshold, 10)`
-    );
+    const totalProducts = await Product.countDocuments();
+    const totalOrders = await Order.countDocuments();
+    const totalCustomers = await User.countDocuments({ role: 'customer' });
 
-    const [recentOrders] = await pool.query(
-      `SELECT o.id, o.order_number, o.final_amount, o.order_status, o.created_at, u.name as customer_name 
-       FROM orders o 
-       JOIN users u ON o.user_id = u.id 
-       ORDER BY o.id DESC LIMIT 5`
-    );
+    // Revenue totals
+    const successfulOrders = await Order.find({ payment_status: 'Successful' }).lean();
+    const totalRevenue = successfulOrders.reduce((sum, o) => sum + (parseFloat(o.final_amount) || 0), 0);
+
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const todaysSales = successfulOrders
+      .filter(o => new Date(o.created_at || o.createdAt) >= startOfToday)
+      .reduce((sum, o) => sum + (parseFloat(o.final_amount) || 0), 0);
+
+    const pendingOrders = await Order.countDocuments({
+      order_status: { $nin: ['Delivered', 'Cancelled'] }
+    });
+
+    const lowStockCount = await Product.countDocuments({
+      stock_quantity: { $lte: 10 }
+    });
+
+    const recentOrdersRaw = await Order.find()
+      .sort({ _id: -1 })
+      .limit(5)
+      .lean();
+
+    const recentOrders = recentOrdersRaw.map(o => ({
+      id: o._id.toString(),
+      order_number: o.order_number,
+      final_amount: o.final_amount,
+      order_status: o.order_status,
+      created_at: o.created_at || o.createdAt,
+      customer_name: o.customer_name || 'Customer'
+    }));
 
     res.json({
       success: true,
       stats: {
-        totalProducts: parseInt(totalProducts || 0),
-        totalOrders: parseInt(totalOrders || 0),
-        totalCustomers: parseInt(totalCustomers || 0),
-        todaysSales: parseFloat(todaysSales || 0),
-        totalRevenue: parseFloat(totalRevenue || 0),
-        pendingOrders: parseInt(pendingOrders || 0),
-        lowStockCount: parseInt(lowStockCount || 0),
-        recentOrders: recentOrders || []
+        totalProducts,
+        totalOrders,
+        totalCustomers,
+        todaysSales: parseFloat(todaysSales.toFixed(2)),
+        totalRevenue: parseFloat(totalRevenue.toFixed(2)),
+        pendingOrders,
+        lowStockCount,
+        recentOrders
       }
     });
   } catch (error) {
@@ -53,74 +75,81 @@ router.get('/stats', authenticateToken, requireAdmin, handleGetMetrics);
 router.get('/', authenticateToken, requireAdmin, handleGetMetrics);
 
 /**
- * 2. ADMIN: Sales Analytics & Performance Charts (Aggregated from MySQL)
+ * 2. ADMIN: Sales Analytics & Performance Charts (MongoDB)
  */
 router.get('/sales-analytics', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const [[{ totalRevenue }]] = await pool.query('SELECT COALESCE(SUM(final_amount), 0) as totalRevenue FROM orders WHERE payment_status = "Successful"');
-    const [[{ couponsRedeemedCount }]] = await pool.query('SELECT COALESCE(SUM(times_used), 0) as couponsRedeemedCount FROM coupons');
-    const [[{ loyaltyUsageCount }]] = await pool.query('SELECT COUNT(*) as loyaltyUsageCount FROM loyalty_transactions WHERE transaction_type = "REDEEMED"');
+    const successfulOrders = await Order.find({ payment_status: 'Successful' }).lean();
+    const totalRevenue = successfulOrders.reduce((sum, o) => sum + (parseFloat(o.final_amount) || 0), 0);
 
-    // Category Sales Breakdown from order_items
-    const [catBreakdown] = await pool.query(`
-      SELECT c.name as category, 
-             COALESCE(SUM(oi.subtotal), 0) as revenue,
-             COUNT(oi.id) as count
-      FROM categories c
-      LEFT JOIN products p ON c.id = p.category_id
-      LEFT JOIN order_items oi ON p.id = oi.product_id
-      GROUP BY c.id
-      ORDER BY revenue DESC
-    `);
+    const coupons = await Coupon.find().lean();
+    const couponsRedeemedCount = coupons.reduce((sum, c) => sum + (c.times_used || 0), 0);
 
-    const totalRev = parseFloat(totalRevenue || 0);
-    const profitEstimate = totalRev * 0.35; // 35% margin
+    const loyaltyUsageCount = await LoyaltyTransaction.countDocuments({ transaction_type: 'REDEEMED' });
 
-    const formattedCategoryBreakdown = catBreakdown.map(c => ({
-      category: c.category,
-      revenue: parseFloat(c.revenue || 0),
-      percentage: totalRev > 0 ? Math.round((parseFloat(c.revenue || 0) / totalRev) * 100) : 0
+    // Category Sales Breakdown
+    const categoryTotals = {};
+    for (const ord of successfulOrders) {
+      if (ord.items && Array.isArray(ord.items)) {
+        for (const item of ord.items) {
+          const cat = item.category || 'Confectionery';
+          categoryTotals[cat] = (categoryTotals[cat] || 0) + (parseFloat(item.subtotal) || 0);
+        }
+      }
+    }
+
+    const categories = await Category.find().lean();
+    let formattedCategoryBreakdown = Object.keys(categoryTotals).map(cat => ({
+      category: cat,
+      revenue: parseFloat(categoryTotals[cat].toFixed(2)),
+      percentage: totalRevenue > 0 ? Math.round((categoryTotals[cat] / totalRevenue) * 100) : 0
     }));
 
-    // Daily Sales for the current week
-    const [dailyRows] = await pool.query(`
-      SELECT DAYNAME(created_at) as day, DATE(created_at) as date, COALESCE(SUM(final_amount), 0) as sales
-      FROM orders
-      WHERE payment_status = 'Successful' AND created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-      GROUP BY DATE(created_at), DAYNAME(created_at)
-      ORDER BY DATE(created_at) ASC
-    `);
+    if (formattedCategoryBreakdown.length === 0) {
+      formattedCategoryBreakdown = [
+        { category: 'Cakes', percentage: 48, revenue: Math.round(totalRevenue * 0.48) },
+        { category: 'Chocolates', percentage: 28, revenue: Math.round(totalRevenue * 0.28) },
+        { category: 'Cupcakes', percentage: 14, revenue: Math.round(totalRevenue * 0.14) },
+        { category: 'Brownies', percentage: 10, revenue: Math.round(totalRevenue * 0.10) }
+      ];
+    }
 
+    // Daily Sales for current week
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const dailySales = days.map(d => {
-      const match = dailyRows.find(r => r.day && r.day.startsWith(d));
-      return {
-        day: d,
-        sales: match ? parseFloat(match.sales) : 0
-      };
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    const weekOrders = successfulOrders.filter(o => new Date(o.created_at || o.createdAt) >= sevenDaysAgo);
+
+    const salesByDayIndex = {};
+    weekOrders.forEach(o => {
+      const d = new Date(o.created_at || o.createdAt);
+      const dayIdx = (d.getDay() + 6) % 7; // Monday = 0
+      salesByDayIndex[dayIdx] = (salesByDayIndex[dayIdx] || 0) + (parseFloat(o.final_amount) || 0);
     });
+
+    const dailySales = days.map((d, idx) => ({
+      day: d,
+      sales: salesByDayIndex[idx] ? parseFloat(salesByDayIndex[idx].toFixed(2)) : 0
+    }));
 
     res.json({
       success: true,
       analytics: {
         dailySales,
         weeklySales: [
-          { week: 'Week 1', revenue: Math.round(totalRev * 0.2) },
-          { week: 'Week 2', revenue: Math.round(totalRev * 0.25) },
-          { week: 'Week 3', revenue: Math.round(totalRev * 0.25) },
-          { week: 'Week 4', revenue: Math.round(totalRev * 0.3) }
+          { week: 'Week 1', revenue: Math.round(totalRevenue * 0.2) },
+          { week: 'Week 2', revenue: Math.round(totalRevenue * 0.25) },
+          { week: 'Week 3', revenue: Math.round(totalRevenue * 0.25) },
+          { week: 'Week 4', revenue: Math.round(totalRevenue * 0.3) }
         ],
-        categoryBreakdown: formattedCategoryBreakdown.length > 0 ? formattedCategoryBreakdown : [
-          { category: 'Cakes', percentage: 50, revenue: totalRev * 0.5 },
-          { category: 'Chocolates', percentage: 30, revenue: totalRev * 0.3 },
-          { category: 'Brownies', percentage: 20, revenue: totalRev * 0.2 }
-        ],
+        categoryBreakdown: formattedCategoryBreakdown,
         summary: {
-          totalRevenue: totalRev,
-          profitEstimate,
+          totalRevenue: parseFloat(totalRevenue.toFixed(2)),
+          profitEstimate: parseFloat((totalRevenue * 0.35).toFixed(2)),
           customerGrowthRate: '+15.2%',
-          loyaltyUsageCount: parseInt(loyaltyUsageCount || 0),
-          couponsRedeemedCount: parseInt(couponsRedeemedCount || 0)
+          loyaltyUsageCount,
+          couponsRedeemedCount
         }
       }
     });
@@ -131,40 +160,51 @@ router.get('/sales-analytics', authenticateToken, requireAdmin, async (req, res)
 });
 
 /**
- * 3. ADMIN: Stock Prediction & Demand Forecasting (Pure MySQL)
+ * 3. ADMIN: Stock Prediction & Demand Forecasting (MongoDB)
  */
 router.get('/stock-predictions', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const [products] = await pool.query(`
-      SELECT p.id, p.name, p.stock_quantity, COALESCE(i.min_threshold, 10) as min_threshold,
-             COALESCE(SUM(oi.quantity), 0) as total_sold
-      FROM products p
-      LEFT JOIN inventory i ON p.id = i.product_id
-      LEFT JOIN order_items oi ON p.id = oi.product_id
-      GROUP BY p.id
-      ORDER BY total_sold DESC
-    `);
+    const products = await Product.find().lean();
 
-    const fastMoving = products.slice(0, 3).map(p => {
-      const sold = parseInt(p.total_sold || 0);
-      const velocity = Math.max(1.0, sold > 0 ? (sold / 7).toFixed(1) : 2.5);
-      const daysLeft = Math.max(1, Math.round(p.stock_quantity / velocity));
+    const orders = await Order.find().lean();
+    const productSoldMap = {};
+    orders.forEach(o => {
+      if (o.items && Array.isArray(o.items)) {
+        o.items.forEach(i => {
+          const pid = (i.product_id || '').toString();
+          productSoldMap[pid] = (productSoldMap[pid] || 0) + (i.quantity || 1);
+        });
+      }
+    });
+
+    const enrichedProducts = products.map(p => {
+      const sold = productSoldMap[p._id.toString()] || 0;
       return {
-        id: p.id,
+        ...p,
+        total_sold: sold,
+        min_threshold: 10
+      };
+    }).sort((a, b) => b.total_sold - a.total_sold);
+
+    const fastMoving = enrichedProducts.slice(0, 3).map(p => {
+      const velocity = Math.max(1.0, p.total_sold > 0 ? parseFloat((p.total_sold / 7).toFixed(1)) : 2.5);
+      const daysLeft = Math.max(1, Math.round((p.stock_quantity || 10) / velocity));
+      return {
+        id: p._id.toString(),
         name: p.name,
-        daily_velocity: parseFloat(velocity),
-        stock_quantity: p.stock_quantity,
+        daily_velocity: velocity,
+        stock_quantity: p.stock_quantity || 0,
         predicted_days_left: daysLeft,
-        reorder_suggestion: p.stock_quantity <= p.min_threshold ? p.min_threshold * 2 : 0
+        reorder_suggestion: (p.stock_quantity || 0) <= 10 ? 20 : 0
       };
     });
 
-    const slowMoving = products.slice(-3).map(p => ({
-      id: p.id,
+    const slowMoving = enrichedProducts.slice(-3).map(p => ({
+      id: p._id.toString(),
       name: p.name,
       daily_velocity: 0.5,
-      stock_quantity: p.stock_quantity,
-      predicted_days_left: Math.round(p.stock_quantity / 0.5),
+      stock_quantity: p.stock_quantity || 0,
+      predicted_days_left: Math.round((p.stock_quantity || 0) / 0.5),
       reorder_suggestion: 0
     }));
 
@@ -173,7 +213,7 @@ router.get('/stock-predictions', authenticateToken, requireAdmin, async (req, re
       predictions: {
         fastMoving,
         slowMoving,
-        reorderAlertsCount: products.filter(p => p.stock_quantity <= p.min_threshold).length,
+        reorderAlertsCount: products.filter(p => (p.stock_quantity || 0) <= 10).length,
         forecastTrend: [
           { month: 'Jun', demand: 180 },
           { month: 'Jul', demand: 220 },

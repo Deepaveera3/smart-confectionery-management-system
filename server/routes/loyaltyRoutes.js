@@ -1,5 +1,7 @@
 const express = require('express');
-const { pool } = require('../config/db');
+const LoyaltyAccount = require('../models/LoyaltyAccount');
+const LoyaltyTransaction = require('../models/LoyaltyTransaction');
+const Notification = require('../models/Notification');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
@@ -15,54 +17,38 @@ const DEFAULT_LOYALTY_RULES = {
 };
 
 function calculateTier(totalEarned) {
-  if (totalEarned >= DEFAULT_LOYALTY_RULES.royal_threshold) return 'Royal';
-  if (totalEarned >= DEFAULT_LOYALTY_RULES.gold_threshold) return 'Gold';
-  if (totalEarned >= DEFAULT_LOYALTY_RULES.silver_threshold) return 'Silver';
+  if (totalEarned >= 1000) return 'Royal';
+  if (totalEarned >= 500) return 'Gold';
+  if (totalEarned >= 200) return 'Silver';
   return 'Bronze';
 }
 
-/**
- * 1. CUSTOMER: Get Own Loyalty Card, Balance & History
- */
+// 1. Get Customer Loyalty (my-account, my-card, customer)
 async function handleGetCustomerLoyalty(req, res) {
   const userId = req.user.id;
-
   try {
-    const [rows] = await pool.query('SELECT * FROM loyalty_accounts WHERE user_id = ?', [userId]);
-    let account = rows[0];
+    let account = await LoyaltyAccount.findOne({ user_id: userId });
 
     if (!account) {
       const cardNumber = `SH-LOYAL-2026-${Math.floor(1000 + Math.random() * 9000)}`;
-      const [resIns] = await pool.query(
-        'INSERT INTO loyalty_accounts (user_id, loyalty_card_number, current_points, total_points_earned, tier) VALUES (?, ?, 50, 50, "Bronze")',
-        [userId, cardNumber]
-      );
-      await pool.query(
-        'INSERT INTO loyalty_transactions (loyalty_account_id, points, transaction_type, description) VALUES (?, 50, "BONUS", "Welcome Bonus Points")',
-        [resIns.insertId]
-      );
-      const [newRows] = await pool.query('SELECT * FROM loyalty_accounts WHERE id = ?', [resIns.insertId]);
-      account = newRows[0];
+      account = await LoyaltyAccount.create({ user_id: userId, loyalty_card_number: cardNumber, current_points: 50, total_points_earned: 50, tier: 'Bronze' });
+      await LoyaltyTransaction.create({ loyalty_account_id: account._id, user_id: userId, points: 50, transaction_type: 'BONUS', description: 'Welcome Bonus Points' });
     }
 
     const dynamicTier = calculateTier(account.total_points_earned || 0);
     if (dynamicTier !== account.tier) {
-      await pool.query('UPDATE loyalty_accounts SET tier = ? WHERE id = ?', [dynamicTier, account.id]);
+      await LoyaltyAccount.findByIdAndUpdate(account._id, { tier: dynamicTier });
       account.tier = dynamicTier;
     }
 
-    const [transactions] = await pool.query(
-      'SELECT * FROM loyalty_transactions WHERE loyalty_account_id = ? ORDER BY id DESC LIMIT 50',
-      [account.id]
-    );
+    const transactions = await LoyaltyTransaction.find({ loyalty_account_id: account._id }).sort({ createdAt: -1 }).limit(50).lean();
 
     res.json({
       success: true,
-      account: { ...account, tier: dynamicTier },
-      transactions: transactions || [],
+      account: { ...account.toObject(), id: account._id.toString(), tier: dynamicTier },
+      transactions: transactions.map(t => ({ ...t, id: t._id.toString() })),
       rules: DEFAULT_LOYALTY_RULES
     });
-
   } catch (error) {
     console.error('Fetch customer loyalty error:', error);
     res.status(500).json({ success: false, message: 'Failed to retrieve loyalty account.' });
@@ -73,36 +59,25 @@ router.get('/customer', authenticateToken, handleGetCustomerLoyalty);
 router.get('/my-account', authenticateToken, handleGetCustomerLoyalty);
 router.get('/my-card', authenticateToken, handleGetCustomerLoyalty);
 
-/**
- * 2. CUSTOMER: Daily Check-in Streak Reward
- */
+// 2. Daily Check-in
 router.post('/daily-checkin', authenticateToken, async (req, res) => {
   const userId = req.user.id;
-
-  const connection = await pool.getConnection();
   try {
-    await connection.beginTransaction();
+    let account = await LoyaltyAccount.findOne({ user_id: userId });
+    if (!account) return res.status(404).json({ success: false, message: 'Loyalty account not found.' });
 
-    const [rows] = await connection.query('SELECT * FROM loyalty_accounts WHERE user_id = ?', [userId]);
-    if (rows.length === 0) {
-      await connection.rollback();
-      connection.release();
-      return res.status(404).json({ success: false, message: 'Loyalty account not found.' });
-    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
 
-    const account = rows[0];
+    const alreadyClaimed = await LoyaltyTransaction.findOne({
+      loyalty_account_id: account._id,
+      transaction_type: 'BONUS',
+      description: { $regex: 'Daily Check-in', $options: 'i' },
+      created_at: { $gte: today, $lt: tomorrow }
+    });
 
-    // Check if user already claimed today
-    const [recentTxns] = await connection.query(
-      `SELECT id FROM loyalty_transactions 
-       WHERE loyalty_account_id = ? AND transaction_type = 'BONUS' AND description LIKE '%Daily Check-in%'
-       AND DATE(created_at) = CURDATE()`,
-      [account.id]
-    );
-
-    if (recentTxns.length > 0) {
-      await connection.rollback();
-      connection.release();
+    if (alreadyClaimed) {
       return res.status(400).json({ success: false, message: 'Daily reward already claimed today! Check back tomorrow.' });
     }
 
@@ -111,129 +86,71 @@ router.post('/daily-checkin', authenticateToken, async (req, res) => {
     const newTotal = account.total_points_earned + rewardPoints;
     const newTier = calculateTier(newTotal);
 
-    await connection.query(
-      'UPDATE loyalty_accounts SET current_points = ?, total_points_earned = ?, tier = ? WHERE id = ?',
-      [newCurrent, newTotal, newTier, account.id]
-    );
+    await LoyaltyAccount.findByIdAndUpdate(account._id, { current_points: newCurrent, total_points_earned: newTotal, tier: newTier });
+    await LoyaltyTransaction.create({ loyalty_account_id: account._id, user_id: userId, points: rewardPoints, transaction_type: 'BONUS', description: 'Daily Check-in Streak Bonus (+10 pts)' });
+    await Notification.create({ user_id: userId, type: 'LOYALTY', title: 'Daily Reward Claimed!', message: 'You received +10 loyalty reward points for checking in today.', is_read: 0 });
 
-    await connection.query(
-      'INSERT INTO loyalty_transactions (loyalty_account_id, points, transaction_type, description) VALUES (?, ?, "BONUS", "Daily Check-in Streak Bonus (+10 pts)")',
-      [account.id, rewardPoints]
-    );
-
-    await connection.query(
-      'INSERT INTO notifications (user_id, type, title, message) VALUES (?, "LOYALTY", "Daily Reward Claimed!", "You received +10 loyalty reward points for checking in today.")',
-      [userId]
-    );
-
-    await connection.commit();
-    connection.release();
-
-    res.json({
-      success: true,
-      message: 'Daily check-in reward claimed! +10 points added.',
-      pointsAdded: rewardPoints,
-      currentPoints: newCurrent,
-      tier: newTier
-    });
-
+    res.json({ success: true, message: 'Daily check-in reward claimed! +10 points added.', pointsAdded: rewardPoints, currentPoints: newCurrent, tier: newTier });
   } catch (error) {
-    await connection.rollback();
-    connection.release();
     console.error('Daily check-in error:', error);
     res.status(500).json({ success: false, message: 'Failed to claim daily check-in reward.' });
   }
 });
 
-/**
- * 3. ADMIN: Get All Loyalty Accounts
- */
+// 3. ADMIN: Get All Loyalty Accounts
 router.get('/', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const [accounts] = await pool.query(
-      `SELECT l.*, u.name as customer_name, u.email as customer_email, u.phone as customer_phone
-       FROM loyalty_accounts l
-       JOIN users u ON l.user_id = u.id
-       ORDER BY l.current_points DESC`
-    );
+    const accounts = await LoyaltyAccount.find({}).sort({ current_points: -1 }).lean();
+    const transactions = await LoyaltyTransaction.find({}).sort({ createdAt: -1 }).limit(50).lean();
 
-    const [transactions] = await pool.query(
-      `SELECT lt.*, la.loyalty_card_number, u.name as customer_name
-       FROM loyalty_transactions lt
-       JOIN loyalty_accounts la ON lt.loyalty_account_id = la.id
-       JOIN users u ON la.user_id = u.id
-       ORDER BY lt.id DESC LIMIT 50`
-    );
-
-    res.json({ success: true, accounts, transactions, rules: DEFAULT_LOYALTY_RULES });
+    res.json({
+      success: true,
+      accounts: accounts.map(a => ({ ...a, id: a._id.toString() })),
+      transactions: transactions.map(t => ({ ...t, id: t._id.toString() })),
+      rules: DEFAULT_LOYALTY_RULES
+    });
   } catch (error) {
     console.error('Fetch all loyalty accounts error:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch loyalty accounts.' });
   }
 });
 
-/**
- * 4. ADMIN: Adjust Loyalty Points Manually
- */
+// 4. ADMIN: Adjust Loyalty Points
 router.post('/adjust', authenticateToken, requireAdmin, async (req, res) => {
   const { account_id, user_id, points, reason } = req.body;
   const adjustPoints = parseInt(points);
-
   if (isNaN(adjustPoints) || (!account_id && !user_id)) {
     return res.status(400).json({ success: false, message: 'Valid account identifier and point adjustment amount are required.' });
   }
 
-  const connection = await pool.getConnection();
   try {
-    await connection.beginTransaction();
+    let account = account_id
+      ? await LoyaltyAccount.findById(account_id)
+      : await LoyaltyAccount.findOne({ user_id });
 
-    let account;
-    if (account_id) {
-      const [rows] = await connection.query('SELECT * FROM loyalty_accounts WHERE id = ?', [account_id]);
-      account = rows[0];
-    } else {
-      const [rows] = await connection.query('SELECT * FROM loyalty_accounts WHERE user_id = ?', [user_id]);
-      account = rows[0];
-    }
-
-    if (!account) {
-      await connection.rollback();
-      connection.release();
-      return res.status(404).json({ success: false, message: 'Loyalty account not found.' });
-    }
+    if (!account) return res.status(404).json({ success: false, message: 'Loyalty account not found.' });
 
     const newCurrent = Math.max(0, account.current_points + adjustPoints);
     const newTotal = adjustPoints > 0 ? account.total_points_earned + adjustPoints : account.total_points_earned;
     const newTier = calculateTier(newTotal);
 
-    await connection.query(
-      'UPDATE loyalty_accounts SET current_points = ?, total_points_earned = ?, tier = ? WHERE id = ?',
-      [newCurrent, newTotal, newTier, account.id]
-    );
-
-    await connection.query(
-      'INSERT INTO loyalty_transactions (loyalty_account_id, points, transaction_type, description) VALUES (?, ?, "ADMIN_ADJUSTMENT", ?)',
-      [account.id, adjustPoints, reason || `Manual Admin Point Adjustment (${adjustPoints > 0 ? '+' : ''}${adjustPoints})`]
-    );
-
-    await connection.query(
-      'INSERT INTO notifications (user_id, type, title, message) VALUES (?, "LOYALTY", "Loyalty Points Adjustment", ?)',
-      [account.user_id, `Your loyalty reward points were adjusted by ${adjustPoints > 0 ? '+' : ''}${adjustPoints} points. Reason: ${reason || 'Admin adjustment'}.`]
-    );
-
-    await connection.commit();
-    connection.release();
-
-    res.json({
-      success: true,
-      message: `Points adjusted successfully (${adjustPoints > 0 ? '+' : ''}${adjustPoints} pts).`,
-      currentPoints: newCurrent,
-      tier: newTier
+    await LoyaltyAccount.findByIdAndUpdate(account._id, { current_points: newCurrent, total_points_earned: newTotal, tier: newTier });
+    await LoyaltyTransaction.create({
+      loyalty_account_id: account._id,
+      user_id: account.user_id,
+      points: adjustPoints,
+      transaction_type: 'ADMIN_ADJUSTMENT',
+      description: reason || `Manual Admin Point Adjustment (${adjustPoints > 0 ? '+' : ''}${adjustPoints})`
+    });
+    await Notification.create({
+      user_id: account.user_id, type: 'LOYALTY',
+      title: 'Loyalty Points Adjustment',
+      message: `Your loyalty reward points were adjusted by ${adjustPoints > 0 ? '+' : ''}${adjustPoints} points. Reason: ${reason || 'Admin adjustment'}.`,
+      is_read: 0
     });
 
+    res.json({ success: true, message: `Points adjusted successfully (${adjustPoints > 0 ? '+' : ''}${adjustPoints} pts).`, currentPoints: newCurrent, tier: newTier });
   } catch (error) {
-    await connection.rollback();
-    connection.release();
     console.error('Points adjust error:', error);
     res.status(500).json({ success: false, message: 'Failed to adjust loyalty points in database.' });
   }

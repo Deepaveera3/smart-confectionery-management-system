@@ -1,16 +1,18 @@
 const express = require('express');
-const { pool } = require('../config/db');
+const mongoose = require('mongoose');
+const Coupon = require('../models/Coupon');
+const Offer = require('../models/Offer');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
 
 /**
- * 1. PUBLIC: Get Active Offers & Coupons
+ * 1. PUBLIC: Get Active Offers & Coupons (MongoDB)
  */
 router.get('/', async (req, res) => {
   try {
-    const [coupons] = await pool.query('SELECT * FROM coupons WHERE is_active = 1 ORDER BY id DESC');
-    const [offers] = await pool.query('SELECT * FROM offers WHERE is_active = 1 ORDER BY id DESC');
+    const coupons = await Coupon.find({ is_active: 1 }).sort({ _id: -1 });
+    const offers = await Offer.find({ is_active: 1 }).sort({ _id: -1 });
     res.json({ success: true, coupons, offers });
   } catch (error) {
     console.error('Fetch offers error:', error);
@@ -19,12 +21,12 @@ router.get('/', async (req, res) => {
 });
 
 /**
- * 2. ADMIN: Get All Offers & Coupons
+ * 2. ADMIN: Get All Offers & Coupons (MongoDB)
  */
 router.get('/admin/all', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const [coupons] = await pool.query('SELECT * FROM coupons ORDER BY id DESC');
-    const [offers] = await pool.query('SELECT * FROM offers ORDER BY id DESC');
+    const coupons = await Coupon.find().sort({ _id: -1 });
+    const offers = await Offer.find().sort({ _id: -1 });
     res.json({ success: true, coupons, offers });
   } catch (error) {
     console.error('Fetch admin offers error:', error);
@@ -42,23 +44,20 @@ router.post('/', authenticateToken, requireAdmin, async (req, res) => {
   }
 
   try {
-    const [result] = await pool.query(
-      `INSERT INTO coupons (code, discount_type, discount_value, min_order_amount, max_discount_amount, expiry_date, is_active) 
-       VALUES (?, ?, ?, ?, ?, ?, 1)`,
-      [
-        code.trim().toUpperCase(), 
-        discount_type || 'percentage', 
-        parseFloat(discount_value), 
-        parseFloat(min_order_amount || 0),
-        max_discount_amount ? parseFloat(max_discount_amount) : null,
-        expiry_date || null
-      ]
-    );
+    const newCoupon = await Coupon.create({
+      code: code.trim().toUpperCase(),
+      discount_type: discount_type || 'percentage',
+      discount_value: parseFloat(discount_value),
+      min_order_amount: parseFloat(min_order_amount || 0),
+      max_discount_amount: max_discount_amount ? parseFloat(max_discount_amount) : null,
+      expiry_date: expiry_date || null,
+      is_active: 1
+    });
 
     res.json({
       success: true,
       message: 'Coupon created successfully.',
-      couponId: result.insertId
+      couponId: newCoupon._id.toString()
     });
   } catch (error) {
     console.error('Create coupon error:', error);
@@ -70,10 +69,14 @@ router.post('/', authenticateToken, requireAdmin, async (req, res) => {
  * 4. ADMIN: Delete Coupon
  */
 router.delete('/:id', authenticateToken, requireAdmin, async (req, res) => {
-  const couponId = parseInt(req.params.id);
+  const couponId = req.params.id;
   try {
-    const [result] = await pool.query('DELETE FROM coupons WHERE id = ?', [couponId]);
-    if (result.affectedRows === 0) {
+    const query = mongoose.isValidObjectId(couponId)
+      ? { _id: couponId }
+      : { $or: [{ _id: couponId }, { legacy_id: Number(couponId) || null }] };
+
+    const result = await Coupon.findOneAndDelete(query);
+    if (!result) {
       return res.status(404).json({ success: false, message: 'Coupon not found.' });
     }
     res.json({ success: true, message: 'Coupon deleted successfully.' });

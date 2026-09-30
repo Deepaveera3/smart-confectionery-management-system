@@ -793,17 +793,9 @@ export default function AdminDashboardPage() {
       </header>
 
       {/* Main Admin Workspace (Sidebar + Content Body) */}
-      <div style={{ display: 'flex', flex: 1 }}>
+      <div className="admin-workspace">
         {/* Sidebar */}
-        <aside style={{
-          width: '240px',
-          background: 'var(--bg-surface)',
-          borderRight: '1px solid var(--border-light)',
-          padding: '1.25rem 0.75rem',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '0.35rem'
-        }}>
+        <aside className="admin-sidebar">
           <button 
             className={`admin-nav-item ${activeTab === 'dashboard' ? 'active' : ''}`}
             onClick={() => setActiveTab('dashboard')}
@@ -876,7 +868,7 @@ export default function AdminDashboardPage() {
         </aside>
 
         {/* Dynamic Content Panel */}
-        <main style={{ flex: 1, padding: '1.75rem 2rem', overflowY: 'auto' }}>
+        <main className="admin-main">
           {/* TAB 1: DASHBOARD OVERVIEW */}
           {activeTab === 'dashboard' && (
             <div>
@@ -942,7 +934,7 @@ export default function AdminDashboardPage() {
               </div>
 
               {/* Recent Orders & Stock Overview Grid */}
-              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem' }}>
+              <div className="admin-dashboard-two-col">
                 {/* Recent Orders Widget */}
                 <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-light)', padding: '1.25rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>

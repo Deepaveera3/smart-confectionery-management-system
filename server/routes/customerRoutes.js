@@ -1,32 +1,50 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const { pool } = require('../config/db');
+const mongoose = require('mongoose');
+const User = require('../models/User');
+const LoyaltyAccount = require('../models/LoyaltyAccount');
+const Address = require('../models/Address');
+const Order = require('../models/Order');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
 
+function buildUserQuery(id) {
+  if (mongoose.isValidObjectId(id)) {
+    return { $or: [{ _id: id }, { legacy_id: Number(id) || null }] };
+  }
+  return { legacy_id: Number(id) || null };
+}
+
 /**
- * 1. CUSTOMER: Get Own Profile, Loyalty, Addresses
+ * 1. CUSTOMER: Get Own Profile, Loyalty, Addresses (MongoDB)
  */
 router.get('/profile', authenticateToken, async (req, res) => {
   const userId = req.user.id;
   try {
-    const [users] = await pool.query(
-      'SELECT id, name, email, phone, role, status, avatar, created_at FROM users WHERE id = ?',
-      [userId]
-    );
+    const user = await User.findOne(buildUserQuery(userId));
 
-    if (users.length === 0) {
+    if (!user) {
       return res.status(404).json({ success: false, message: 'User profile not found.' });
     }
 
-    const [loyalty] = await pool.query('SELECT * FROM loyalty_accounts WHERE user_id = ?', [userId]);
-    const [addresses] = await pool.query('SELECT * FROM addresses WHERE user_id = ? ORDER BY is_default DESC, id DESC', [userId]);
+    const uid = user._id.toString();
+    const loyalty = await LoyaltyAccount.findOne({ $or: [{ user_id: uid }, { user_id: user.legacy_id }] });
+    const addresses = await Address.find({ $or: [{ user_id: uid }, { user_id: user.legacy_id }] }).sort({ is_default: -1, _id: -1 });
 
     res.json({
       success: true,
-      user: users[0],
-      loyalty: loyalty[0] || null,
+      user: {
+        id: user._id.toString(),
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        status: user.status,
+        avatar: user.avatar,
+        created_at: user.created_at
+      },
+      loyalty: loyalty || null,
       addresses: addresses || []
     });
   } catch (error) {
@@ -36,7 +54,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
 });
 
 /**
- * 2. CUSTOMER: Update Profile Details
+ * 2. CUSTOMER: Update Profile Details (MongoDB)
  */
 router.put('/profile', authenticateToken, async (req, res) => {
   const userId = req.user.id;
@@ -47,10 +65,16 @@ router.put('/profile', authenticateToken, async (req, res) => {
   }
 
   try {
-    await pool.query(
-      'UPDATE users SET name = ?, phone = ? WHERE id = ?',
-      [name.trim(), phone ? phone.trim() : null, userId]
+    const user = await User.findOneAndUpdate(
+      buildUserQuery(userId),
+      { name: name.trim(), phone: phone ? phone.trim() : null },
+      { new: true }
     );
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+
     res.json({ success: true, message: 'Profile updated successfully.' });
   } catch (error) {
     console.error('Update profile error:', error);
@@ -59,7 +83,7 @@ router.put('/profile', authenticateToken, async (req, res) => {
 });
 
 /**
- * 3. CUSTOMER: Change Password
+ * 3. CUSTOMER: Change Password (MongoDB)
  */
 router.put('/change-password', authenticateToken, async (req, res) => {
   const userId = req.user.id;
@@ -74,20 +98,22 @@ router.put('/change-password', authenticateToken, async (req, res) => {
   }
 
   try {
-    const [users] = await pool.query('SELECT password FROM users WHERE id = ?', [userId]);
-    if (users.length === 0) {
+    const user = await User.findOne(buildUserQuery(userId)).select('+password');
+    if (!user) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
 
-    const isMatch = await bcrypt.compare(currentPassword, users[0].password);
-    if (!isMatch && currentPassword !== users[0].password && currentPassword !== 'Customer@123') {
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch && currentPassword !== user.password && currentPassword !== 'Customer@123') {
       return res.status(400).json({ success: false, message: 'Current password is incorrect.' });
     }
 
     const salt = await bcrypt.genSalt(10);
     const newHash = await bcrypt.hash(newPassword, salt);
 
-    await pool.query('UPDATE users SET password = ? WHERE id = ?', [newHash, userId]);
+    user.password = newHash;
+    await user.save();
+
     res.json({ success: true, message: 'Password changed successfully.' });
   } catch (error) {
     console.error('Change password error:', error);
@@ -96,7 +122,7 @@ router.put('/change-password', authenticateToken, async (req, res) => {
 });
 
 /**
- * 4. CUSTOMER: Add Delivery Address
+ * 4. CUSTOMER: Add Delivery Address (MongoDB)
  */
 router.post('/addresses', authenticateToken, async (req, res) => {
   const userId = req.user.id;
@@ -106,42 +132,44 @@ router.post('/addresses', authenticateToken, async (req, res) => {
     return res.status(400).json({ success: false, message: 'Please provide all required address fields.' });
   }
 
-  const connection = await pool.getConnection();
   try {
-    await connection.beginTransaction();
-
     if (is_default) {
-      await connection.query('UPDATE addresses SET is_default = 0 WHERE user_id = ?', [userId]);
+      await Address.updateMany({ user_id: userId }, { is_default: 0 });
     }
 
-    const [resIns] = await connection.query(
-      `INSERT INTO addresses (user_id, full_name, phone, address_line1, address_line2, city, state, pincode, is_default)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [userId, full_name, phone, address_line1, address_line2 || '', city, state || '', pincode, is_default ? 1 : 0]
-    );
+    const newAddress = await Address.create({
+      user_id: userId,
+      full_name: full_name.trim(),
+      phone: phone.trim(),
+      address_line1: address_line1.trim(),
+      address_line2: address_line2 ? address_line2.trim() : '',
+      city: city.trim(),
+      state: state ? state.trim() : '',
+      pincode: pincode.trim(),
+      is_default: is_default ? 1 : 0
+    });
 
-    await connection.commit();
-    connection.release();
-
-    res.json({ success: true, message: 'Address saved successfully.', addressId: resIns.insertId });
+    res.json({ success: true, message: 'Address saved successfully.', addressId: newAddress._id.toString() });
   } catch (error) {
-    await connection.rollback();
-    connection.release();
     console.error('Add address error:', error);
     res.status(500).json({ success: false, message: 'Failed to save address.' });
   }
 });
 
 /**
- * 5. CUSTOMER: Delete Address
+ * 5. CUSTOMER: Delete Address (MongoDB)
  */
 router.delete('/addresses/:id', authenticateToken, async (req, res) => {
   const userId = req.user.id;
-  const addressId = parseInt(req.params.id);
+  const addressId = req.params.id;
 
   try {
-    const [result] = await pool.query('DELETE FROM addresses WHERE id = ? AND user_id = ?', [addressId, userId]);
-    if (result.affectedRows === 0) {
+    const query = mongoose.isValidObjectId(addressId)
+      ? { _id: addressId, user_id: userId }
+      : { $or: [{ _id: addressId }, { legacy_id: Number(addressId) || null }], user_id: userId };
+
+    const result = await Address.findOneAndDelete(query);
+    if (!result) {
       return res.status(404).json({ success: false, message: 'Address not found.' });
     }
     res.json({ success: true, message: 'Address removed.' });
@@ -152,24 +180,36 @@ router.delete('/addresses/:id', authenticateToken, async (req, res) => {
 });
 
 /**
- * 6. ADMIN: Get All Customers List
+ * 6. ADMIN: Get All Customers List (MongoDB)
  */
 router.get('/', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const [customers] = await pool.query(
-      `SELECT u.id, u.name, u.email, u.phone, u.status, u.created_at,
-              l.loyalty_card_number, l.current_points, l.tier,
-              COUNT(o.id) as total_orders,
-              COALESCE(SUM(o.final_amount), 0) as total_spent
-       FROM users u
-       LEFT JOIN loyalty_accounts l ON u.id = l.user_id
-       LEFT JOIN orders o ON u.id = o.user_id
-       WHERE u.role = 'customer'
-       GROUP BY u.id
-       ORDER BY u.id DESC`
-    );
+    const customers = await User.find({ role: 'customer' }).sort({ _id: -1 }).lean();
 
-    res.json({ success: true, customers });
+    const formattedCustomers = await Promise.all(customers.map(async (u) => {
+      const uid = u._id.toString();
+      const loyalty = await LoyaltyAccount.findOne({ $or: [{ user_id: uid }, { user_id: u.legacy_id }] }).lean();
+      
+      const orders = await Order.find({ $or: [{ user_id: uid }, { user_id: u.legacy_id }] }).lean();
+      const total_orders = orders.length;
+      const total_spent = orders.reduce((sum, o) => sum + (parseFloat(o.final_amount) || 0), 0);
+
+      return {
+        id: uid,
+        name: u.name,
+        email: u.email,
+        phone: u.phone,
+        status: u.status,
+        created_at: u.created_at,
+        loyalty_card_number: loyalty ? loyalty.loyalty_card_number : null,
+        current_points: loyalty ? loyalty.current_points : 0,
+        tier: loyalty ? loyalty.tier : 'Bronze',
+        total_orders,
+        total_spent
+      };
+    }));
+
+    res.json({ success: true, customers: formattedCustomers });
   } catch (error) {
     console.error('Fetch all customers error:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch customers from database.' });
@@ -177,10 +217,10 @@ router.get('/', authenticateToken, requireAdmin, async (req, res) => {
 });
 
 /**
- * 7. ADMIN: Toggle Customer Status (Active / Suspended)
+ * 7. ADMIN: Toggle Customer Status (Active / Suspended) (MongoDB)
  */
 router.patch('/:id/status', authenticateToken, requireAdmin, async (req, res) => {
-  const customerId = parseInt(req.params.id);
+  const customerId = req.params.id;
   const { status } = req.body;
 
   if (!status || !['active', 'inactive', 'suspended'].includes(status)) {
@@ -188,8 +228,12 @@ router.patch('/:id/status', authenticateToken, requireAdmin, async (req, res) =>
   }
 
   try {
-    const [result] = await pool.query('UPDATE users SET status = ? WHERE id = ? AND role = "customer"', [status, customerId]);
-    if (result.affectedRows === 0) {
+    const query = mongoose.isValidObjectId(customerId)
+      ? { _id: customerId, role: 'customer' }
+      : { $or: [{ _id: customerId }, { legacy_id: Number(customerId) || null }], role: 'customer' };
+
+    const result = await User.findOneAndUpdate(query, { status }, { new: true });
+    if (!result) {
       return res.status(404).json({ success: false, message: 'Customer not found.' });
     }
     res.json({ success: true, message: `Customer status updated to ${status}.` });
